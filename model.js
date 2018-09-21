@@ -49,7 +49,47 @@ function setHdlMode(v, mode) {
 	}
 }
 
-let item = [];
+let item = [];  // temporary save variable identifiers
+const IO = 0;
+const FF = 1;
+
+function Stat() {
+	let numIO = 0;
+	let numFF = 0;
+	let io = new Set([]);
+	let ff = new Set([]);
+
+	function init() {
+		numIO = 0;
+		numFF = 0;
+		io = new Set([]);
+		ff = new Set([]);
+	}
+	
+	function addID(id, set) { // add identifier to set
+		if (set===IO) {io.add(id)};
+		if (set===FF) {ff.add(id)};
+	}
+	function getSet(set) { // get seleceted Set()
+		if (set===IO) {return io;}
+		if (set===FF) {return ff;}
+	}
+	
+	function addNum(n, set) {
+		if (set===IO) {numIO += n;}
+		if (set===FF) {numFF += n;}		
+	}
+	
+	function emit() {
+		let s = "I/O pins  : "+numIO+"<br>\n";
+		s += "Flip-flops: "+numFF;
+		return s;
+	}
+	
+	return {init, addID, getSet, addNum, emit};
+}
+
+stat = new Stat();
 
 function NumConst(n) { "use strict";
 	let num = Number(n);	
@@ -179,7 +219,7 @@ function Var(s) { "use strict";
  function count() {return 1;}
 
  return {get, set, val, setVal, setNext, next, visit, emitVHD, count};
-}
+} // Var
 
 function Op(o, optType) { "use strict";
  let obj = o; //{left:null, op:"", right:null, type:""};
@@ -497,56 +537,59 @@ function Op(o, optType) { "use strict";
 /* generic statement
    assign: target = var, expr = expression
    if: expr = condition, block = if block, elseblock = else block
-*/
+   target > obj.target
+   */
 function Statement(t) {  "use strict"; 
-	let obj = {id: t, translated: false, level:0, pos:{x:0, y:0}};
-	let expr = null;    // expression or condition
-	let target = null;  // assignment target var
-	let ifBlock = [];   // if statement block 
-	let elseBlock = [];
-	
-	function exprNode(e) {
-		expr = e;
+	let obj = {id: t, target: null, expr: null, ifBlock: null, elseBlock: null, translated: false, level:0, pos:{x:0, y:0}};
+		
+	function get() {
+		return obj;
 	}
 	
-	function targetNode(d) {
-		target = d;
+	function set(o) {
+		let log="";
+		if (o.hasOwnProperty("translated")) {obj.translated = o.translated; log+="translated:"+o.translated;}
+		if (o.hasOwnProperty("level")) {obj.level = o.level; log+="level:"+o.level;}
+		if (o.hasOwnProperty("pos")) {obj.pos = o.pos;}
+		if (o.hasOwnProperty("combProc")) {obj.combProc = o.combProc; log+=" cp:"+o.combProc;}
+		if (o.hasOwnProperty("seqProc")) {obj.seqProc = o.seqProc; log+=" sp:"+o.seqProc;}
+		if (logset) {console.log("Statement.set "+obj.id+log);}
+	}	
+	
+	function setExpr(e) {
+		obj.expr = e;
 	}
 	
-	function getData() {
-		return target;
-	}
-	
-	function getIf() {
-		return ifBlock;
+	function setTarget(d) {
+		obj.target = d;
 	}
 	
 	function setIf(b1, b2) {
-		ifBlock = b1;
-		elseBlock = b2;
+		obj.ifBlock = b1;
+		obj.elseBlock = b2;
 	}
 	
 	function val(firstCycle) {
 		let change = false;
 		
 		if (obj.id==="=" || (firstCycle && (obj.id==="<="))) {
-			let res = expr.val(); 
+			let res = obj.expr.val(); 
 			if (logval) {
-				console.log("St.val "+target.get().name+" = "+vec.hex(res)+", old:"+vec.hex(target.val()));
+				console.log("St.val "+obj.target.get().name+" = "+vec.hex(res)+", old:"+vec.hex(obj.target.val()));
 			}
-			return target.setNext(res);  // true, if value changed
+			return obj.target.setNext(res);  // true, if value changed
 		}
 		if (obj.id==="if") {
-			let b = expr.val();
-			//if (log) {console.log(expr.visit()+ " == "+b);}
+			let b = obj.expr.val();
+			//if (log) {console.log(obj.expr.visit()+ " == "+b);}
 			if (!vec.isZero(b)) { 
-				if (logval) {console.log("St.val if "+expr.visit()+": true");}
-				ifBlock.statements.forEach(function(st) {
+				if (logval) {console.log("St.val if "+obj.expr.visit()+": true");}
+				obj.ifBlock.statements.forEach(function(st) {
 					if (st.val(firstCycle)) {change = true;}
 				});
-			} else if (elseBlock!==null) { // else exists
-			    if (logval) {console.log("St.val if "+expr.visit()+": false");}
-				elseBlock.statements.forEach(function(st) {
+			} else if (obj.elseBlock!==null) { // else exists
+			    if (logval) {console.log("St.val if "+obj.expr.visit()+": false");}
+				obj.elseBlock.statements.forEach(function(st) {
 					if (st.val(firstCycle)) {change = true;}
 				});			
 			}
@@ -555,65 +598,71 @@ function Statement(t) {  "use strict";
 		return false;
 	}
 	
-	function visit(pass, vars) {		
+	function visit(pass, vars) {  // Statement.visit		
 		let str = obj.id+": ";
 		let assignments = 0;
 console.log("Statement.visit: "+pass);
 		
 		if (obj.id==="=" || obj.id==="<=") {
 			if (pass===1) { // first pass, indentify number & type of assignments, count operands			
-				let assignop = hdl(target).assignop;			
+			    if (obj.id==="<=") {stat.addID(obj.target.get().name, FF);} // save id
+				
+				let assignop = hdl(obj.target).assignop;			
 				if ((assignop==="=" && obj.id==="<=") || (assignop==="<=" && obj.id==="=")) {
 					throw formatErr("Mixed comb and sequential assignments!");
 				}
 		
-				assignments = hdl(target).assignments;
+				assignments = hdl(obj.target).assignments;
 				if (assignments===undefined) {assignments=0;}
 console.log("SET A VAR");				
-				target.set({hdl: {assignments:assignments+1, assignop:obj.id}}); 
+				obj.target.set({hdl: {assignments:assignments+1, assignop:obj.id}}); 
 				
-				str += target.visit()+"= "; // visit target, set mode=out
-				setHdlMode(target, "out");
+				str += obj.target.visit()+"= "; // visit target, set mode=out
+				setHdlMode(obj.target, "out");
 				
-				if (expr === null) {str+="?";} 
+				if (obj.expr === null) {str+="?";} 
 				else {				
 					item = [];
-					str += expr.visit();  // visit expression, count operands, set var mode = in				
+					str += obj.expr.visit();  // visit expression, count operands, set var mode = in				
 					for (const id of item) {
 						setHdlMode(vars.get(id), "in");
 					}
 				}
 				
-				if (type(target).size !== type(expr).size) {  // NOTE: Resize assignment, correct expr op
-console.log("Statement.visit: size difference "+type(target).size+" "+type(expr).size);
-					expr.set({type: {size: type(target).size}});
+				if (type(obj.target).size !== type(obj.expr).size) {  // NOTE: Resize assignment, correct expr op
+console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(obj.expr).size);
+					obj.expr.set({type: {size: type(obj.target).size}});
 				}
+				
 			} else {  // second pass
-				if (expr.count()===1) {  // single assignment to num => constant
-					if ((type(expr).id==="num") && (hdl(target).assignments===1)) {
-//console.log("Statement.visit: as="+(hdl(target).assignments===1));					
-						target.set({hdl: {mode:"const", val:vec.out(expr.val())}});
+				if (obj.expr.count()===1) {  // single assignment to num => constant
+					if ((type(obj.expr).id==="num") && (hdl(obj.target).assignments===1)) {
+//console.log("Statement.visit: as="+(hdl(obj.target).assignments===1));					
+						obj.target.set({hdl: {mode:"const", val:vec.out(obj.expr.val())}});
 						obj.translated = true;// exclude from translation to VHDL statements
 					}
 				}
-				if (hdl(target).mode==="inout") { // out signal used as inout
-					const old = target;
-					let name = target.get().name;
-					const tip = type(target);
+				if (hdl(obj.target).mode==="inout") { // out signal used as inout
+					const old = obj.target;
+					
+					old.set({hdl: {mode: "out"}});
+					
+					let name = obj.target.get().name;
+					const tip = type(obj.target);
 					
 					let newname = name + "_sig";
 										
-					target.set({name: newname, mode: ""}); // rename x > xsig, mode = int. signal
+					obj.target.set({name: newname, mode: ""}); // rename x > xsig, mode = int. signal
 					
 					const v = model.getVar(newname);  // new var x, copy type, mode = out
 					v.set({name: name, mode: "out", type: tip});
-					
+					v.set({hdl: {assignments: 1}});
 					const st = new Statement("=");
-					let op = new Op({op:"", left:target, right:null});
+					let op = new Op({op:"", left:obj.target, right:null});
 					op.set({type: type(old)});
 					
-					st.targetNode(v);					
-					st.exprNode(op);
+					st.setTarget(v);					
+					st.setExpr(op);				
 					model.push(st);
 				}
 			}
@@ -621,19 +670,19 @@ console.log("Statement.visit: size difference "+type(target).size+" "+type(expr)
 		} else if (obj.id==="if") {
 			if (pass===1) {
 				item = [];
-				str += expr.visit()+"\n";
+				str += obj.expr.visit()+"\n";
 				for (const id of item) {
 					setHdlMode(vars.get(id), "in");
 				}
 				
-				str += ifBlock.visit(pass, vars);
-				if (elseBlock!==null) {
-					str += "else " + elseBlock.visit(pass, vars);				
+				str += obj.ifBlock.visit(pass, vars);
+				if (obj.elseBlock!==null) {
+					str += "else " + obj.elseBlock.visit(pass, vars);				
 				}
 			} else if (pass===2) {				
-				str += ifBlock.visit(pass, vars);
-				if (elseBlock!==null) {
-					str += "else " + elseBlock.visit(pass, vars);				
+				str += obj.ifBlock.visit(pass, vars);
+				if (obj.elseBlock!==null) {
+					str += "else " + obj.elseBlock.visit(pass, vars);				
 				}
 			}
 		}
@@ -647,18 +696,18 @@ console.log("Statement.visit: size difference "+type(target).size+" "+type(expr)
 		let expStr = "";
 		let num = 0;
 		if ((obj.id==="=" && isComb) || (obj.id==="<=" && !isComb)) {	// assignment						
-			if (expr === null) {return "?";} // unexpected empty expression
+			if (obj.expr === null) {return "?";} // unexpected empty expression
 			
-			expStr = expr.emitVHD();
-			let lsz = type(target).size;
-			let rsz = type(expr).size;
-			if (expr.count()===1) { // single item assignment (num, sig or bit)
+			expStr = obj.expr.emitVHD();
+			let lsz = type(obj.target).size;
+			let rsz = type(obj.expr).size;
+			if (obj.expr.count()===1) { // single item assignment (num, sig or bit)
 				let v = null;
 
-				if (expr.getOp()==="") {
-					v = expr.getLeft();
+				if (obj.expr.getOp()==="") {
+					v = obj.expr.getLeft();
 				} else {
-					v = expr.getRight(); // TODO resolve unary op, unary - only for signed !!
+					v = obj.expr.getRight(); // TODO resolve unary op, unary - only for signed !!
 				}
 									
 				if (type(v).id==="num") { // special code for number assignment
@@ -670,7 +719,7 @@ console.log("Statement.visit: size difference "+type(target).size+" "+type(expr)
 							if (num%2===0) {str += "'0'";}
 							else {str += "'1'";}								
 						} else {
-							if (type(target).unsigned) {
+							if (type(obj.target).unsigned) {
 								str += "to_unsigned("+expStr+","+lsz+")";
 							} else {
 								str += "to_signed("+expStr+","+lsz+")";
@@ -688,9 +737,9 @@ console.log("Statement.visit: size difference "+type(target).size+" "+type(expr)
 						}
 					}
 										
-					if (type(target).unsigned && !type(expr).unsigned) {
+					if (type(obj.target).unsigned && !type(obj.expr).unsigned) {
 						str += "unsigned("+expStr+")";
-					} else if (!type(target).unsigned && type(expr).unsigned) {
+					} else if (!type(obj.target).unsigned && type(obj.expr).unsigned) {
 						str += "signed("+expStr+")";
 					} else {
 						str += expStr;
@@ -698,7 +747,7 @@ console.log("Statement.visit: size difference "+type(target).size+" "+type(expr)
 				}				
 			} else { // expression assignment
 				// TODO 1 bit !
-				if (type(expr).id==="num") { // special code for number assignment
+				if (type(obj.expr).id==="num") { // special code for number assignment
 						if (lsz===1) {								
 							num = Number(expStr);
 							if (num!==0 && num!==1) {
@@ -707,7 +756,7 @@ console.log("Statement.visit: size difference "+type(target).size+" "+type(expr)
 							if (num%2===0) {str += "'0'";}
 							else {str += "'1'";}								
 						} else {
-							if (type(target).unsigned) {
+							if (type(obj.target).unsigned) {
 								str += "to_unsigned("+expStr+","+lsz+")";
 							} else {
 								str += "to_signed("+expStr+","+lsz+")";
@@ -718,9 +767,9 @@ console.log("EXPASIGN "+lsz+" "+rsz);
 					if (lsz!==rsz) {
 						expStr = "resize("+expStr+","+lsz+")";
 					}
-					if (type(target).unsigned && !type(expr).unsigned) {
+					if (type(obj.target).unsigned && !type(obj.expr).unsigned) {
 						str += "unsigned("+expStr+")";
-					} else if (!type(target).unsigned && type(expr).unsigned) {
+					} else if (!type(obj.target).unsigned && type(obj.expr).unsigned) {
 						str += "signed("+expStr+")";
 					} else {
 						str += expStr;
@@ -732,21 +781,22 @@ console.log("EXPASIGN "+lsz+" "+rsz);
 				console.log("Slice ()");
 				str = str.slice(1, -1);
 			}
-			str = spaces + target.visit()+" <= "+str+";\n";
+			str = spaces + obj.target.visit()+" <= "+str+";\n";
 			
 			//str += "\n";
 		} else if (obj.id==="if") {  // if statement, check if belongs to comb 
-console.log("EMIT: "+obj.combProc+": "+isComb);			
+console.log("EMIT: IF"+obj.combProc+": "+isComb);			
 			if ((obj.combProc && isComb) || (obj.seqProc && !isComb)) {
 			
-				str = spaces+"if "+expr.emitVHD()+" then\n";
+				str = spaces+"if "+obj.expr.emitVHD()+" then\n";
 
-				ifBlock.statements.forEach(function (st) {
+				obj.ifBlock.statements.forEach(function (st) {
 					str += st.emitVHD(indent, isComb);
 				});
-				if (elseBlock!==null) {
+				if (obj.elseBlock!==null) {
 					str += spaces+"else\n";
-					elseBlock.statements.forEach(function(st) {
+					obj.elseBlock.statements.forEach(function(st) {
+console.log("EMIT: ELSE"+isComb);						
 						str += st.emitVHD(indent,  isComb);
 					});			
 				}
@@ -756,25 +806,10 @@ console.log("EMIT: "+obj.combProc+": "+isComb);
 		}
 		return str;
 	}
-	
-	function get() {
-		return obj;
-	}
-	
-	function set(o) {
-		let log="";
-		if (o.hasOwnProperty("translated")) {obj.translated = o.translated; log+="translated:"+o.translated;}
-		if (o.hasOwnProperty("level")) {obj.level = o.level; log+="level:"+o.level;}
-		if (o.hasOwnProperty("pos")) {obj.pos = o.pos;}
-		if (o.hasOwnProperty("combProc")) {obj.combProc = o.combProc; log+=" cp:"+o.combProc;}
-		if (o.hasOwnProperty("seqProc")) {obj.seqProc = o.seqProc; log+=" sp:"+o.seqProc;}
-		if (logset) {console.log("Statement.set "+obj.id+log);}
-		
-//console.log("Statement.set "+log);
-	}
+
 	
 	if (log) {console.log("Statement: "+obj.id);}
-	return {get, set, exprNode, targetNode, getData, val, visit, emitVHD, setIf, getIf};
+	return {get, set, setTarget, setExpr, setIf, val, visit, emitVHD};
 }
 
 function Blok(namestring) {
@@ -808,7 +843,7 @@ function Blok(namestring) {
 		}
 		str += st.visit(pass, vars)+"\n";
 		if (pass===1 && (st.get().id==="=" || st.get().id==="<=")) {
-			let id = st.getData().get().name;
+			let id = st.get().target.get().name; 
 //console.log("Blok: = "+id);
 			if (targets.includes(id)) {	
 				throw formatErr("Multiple assignments to "+id+" in the same block!", st.get().pos);				

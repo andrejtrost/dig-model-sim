@@ -255,7 +255,7 @@ function Parse(k) {
 		}
 		
 		
-		a.targetNode(v);		
+		a.setTarget(v);		
 		
 		// opnode
 		let node = new Op({op:"", left:null, right:null});
@@ -263,7 +263,7 @@ function Parse(k) {
 		node = expression(node);
 
 		if (node === undefined) {return;}
-		a.exprNode(node);
+		a.setExpr(node);
 		
 		return a;
 	}
@@ -357,7 +357,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		
 		takeToken("(");		
 		let c = condition(); 
-		ifst.exprNode(c);		
+		ifst.setExpr(c);		
 		takeToken(")");
 		
 		let saveBlok = circ.getBlok();
@@ -444,7 +444,15 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		//console.log(t.pos()+" Unexpected circ after block end! "+peek().id);
 	  }
 	  
+	  stat.init();
+	  
 	  let logStr=circ.visit(1); // visit, first pass
+	  
+	  // get statistics
+	  stat.getSet(FF).forEach(function(id) {
+	      stat.addNum(type(circ.getVar(id)).size, FF);
+	  });
+	  setStat(stat.emit());	  
 	  
 	  if (log) {
 		console.log(logStr);  // log parsed tree and signals

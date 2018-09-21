@@ -64,17 +64,17 @@ function addPort() {
 	let type = "";
 	[...Array(nPorts)].forEach(function(_, i) {		
 		name = document.getElementById("name"+(i+1)).value;
-		s1 += htmInput(i+1, "name", 12, name);
+		s1 += htmInput(i+1, "name", 6, name);
 		mode = document.getElementById("mode"+(i+1)).value;
-		s2 += htmInput(i+1, "mode", 3, mode);
+		s2 += htmInput(i+1, "mode", 1, mode);
 		type = document.getElementById("type"+(i+1)).value;
-		s3 += htmInput(i+1, "type", 3, type);
+		s3 += htmInput(i+1, "type", 1, type);
 	});
 	
 	nPorts += 1;
-	s1 += htmInput(nPorts, "name", 12, "n");
-	s2 += htmInput(nPorts, "mode", 3, mode);
-	s3 += htmInput(nPorts, "type", 3, type);
+	s1 += htmInput(nPorts, "name", 6, "n");
+	s2 += htmInput(nPorts, "mode", 1, mode);
+	s3 += htmInput(nPorts, "type", 1, type);
 	document.getElementById("inName").innerHTML = s1;
 	document.getElementById("inMode").innerHTML = s2;
 	document.getElementById("inType").innerHTML = s3;
@@ -101,10 +101,15 @@ function removePort() {
 
 function clearLog(str) {
   document.getElementById("errlog").innerHTML = "";
+  document.getElementById("stat").innerHTML = "";
 }
 
 function setLog(str) {
   document.getElementById("errlog").innerHTML += str+"\n";
+}
+
+function setStat(str) {
+  document.getElementById("stat").innerHTML += str+"\n";
 }
 
 let code=undefined;

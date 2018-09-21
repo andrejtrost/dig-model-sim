@@ -94,12 +94,13 @@ function VHDLports() {
 function VHDLcomb(proc) {	
 	let s ="";
 	
-	// write comb assignments in the first level block
+	// write comb single assignments in the first level block
 	let b = model.getBlok();
 	b.statements.forEach(function(st) {
 		
 		if (!st.get().translated) {
-			if (st.get().id==="=") {				
+			if (st.get().id==="=" && hdl(st.get().target).assignments===1) {				
+console.log("VHDLcomb: "+hdl(st.get().target).assignments);			
 				st.set({translated: true});
 				s += st.emitVHD(0, true);
 			} 
@@ -110,7 +111,9 @@ function VHDLcomb(proc) {
 		s +="\nprocess(all)\nbegin\n";
 		b.statements.forEach(function(st) {
 			if (!st.get().translated) {
-				if (st.get().id==="if") {
+				if (st.get().id==="=") {
+					s += st.emitVHD(2, true);
+				} else if (st.get().id==="if") {
 					s += st.emitVHD(2, true);
 				}
 			}
@@ -129,6 +132,7 @@ function VHDLseq() {
 	
 	let b = model.getBlok();
 	b.statements.forEach(function(st) {
+//console.log("VHDLseq: "+(st.get().id)+st.get().translated);					
 		if (!st.get().translated) {			
 			s += st.emitVHD(2, false);
 		}
@@ -145,10 +149,15 @@ function searchComb(b, level) {  // traverse code block
 	b.statements.forEach(function(st) {
 //console.log("TR "+level+" st:"+st.get().id+" "+combProc);
 		  if (st.get().id==="if") {
-			let b1 = st.getIf();
+			let b1 = st.get().ifBlock;
+			let b2 = st.get().elseBlock;
 			if (b1.get().combCnt > 0) {combProc = true;}
-			if (searchComb(b1, level+1)) {combProc = true;}			
-//console.log("TR comb:"+combProc);		
+			if (searchComb(b1, level+1)) {combProc = true;}
+			if (b2!== null) {
+				if (b2.get().combCnt > 0) {combProc = true;}
+				if (searchComb(b2, level+1)) {combProc = true;}
+			}
+//console.log("TR comb:"+combProc);
 			st.set({combProc: combProc});  // mark if statement !
 //console.log("POP IF "+b1.get().combCnt+combProc);
 		  }
@@ -161,9 +170,14 @@ function searchSeq(b) {
 
 	b.statements.forEach(function(st) {
 		  if (st.get().id==="if") {
-			let b1 = st.getIf();
+			let b1 = st.get().ifBlock;
+			let b2 = st.get().elseBlock;
 			if (b1.get().seqCnt > 0) {seqProc = true;}
 			if (searchSeq(b1)) {seqProc = true;}					
+			if (b2!== null) {
+				if (b2.get().seqCnt > 0) {seqProc = true;}
+				if (searchSeq(b2)) {seqProc = true;}
+			}			
 			st.set({seqProc: seqProc});  // mark if statement !
 		  }
 	  });
