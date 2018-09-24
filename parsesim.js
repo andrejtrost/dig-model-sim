@@ -9,13 +9,13 @@ const MAXCYC = 1000;
 
 let vec=new Vector();
 //let model = undefined;
-//let pcode=undefined;
 
 function Circuit() {
  let b = new Blok("new");
  let vars = new Map(); 	
  let ports = getPorts();  // read ports from table
  let sequential = false;
+ let srcChanged = false;     // input source changed after parsing
  
  function runErr(s) {return "<span style='color: red;'>Runtime Error </span>: "+s;} 
  
@@ -109,7 +109,12 @@ function Circuit() {
 	 return sequential;
  }
  
- return {vars, ports, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq}; 
+ function changed(b) {
+	 if (b!==undefined) {srcChanged = b;}
+	 return srcChanged;
+ }
+ 
+ return {vars, ports, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq, changed}; 
 }
 
 
@@ -481,8 +486,9 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		});
 	  }	  
 	  setLog("Parse finished.");
-	  	  
+	  parseButton(1);	  
 	  model = circ; // set circuit model
+	  
 	  
   } catch(er) {
 	  setLog(er);

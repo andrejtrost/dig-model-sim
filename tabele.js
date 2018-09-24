@@ -52,7 +52,7 @@ function getDefaultType() {  // oldgetType -> getDefaultType
 }
 
 function htmInput(i, id, size, value) {
-	return "<input id='"+id+i+"' size='"+size+"' value='"+value+"' type='text'><br>";
+	return "<input id='"+id+i+"' size='"+size+"' value='"+value+"' type='text' onchange='changeSource();'><br>";
 }
 
 function addPort() {	
@@ -78,6 +78,7 @@ function addPort() {
 	document.getElementById("inName").innerHTML = s1;
 	document.getElementById("inMode").innerHTML = s2;
 	document.getElementById("inType").innerHTML = s3;
+	changeSource();
 }
 
 function removePort() {
@@ -95,6 +96,7 @@ function removePort() {
 	s = document.getElementById("inType").innerHTML;
 	n = s.lastIndexOf("<input");
 	document.getElementById("inType").innerHTML = s.substring(0, n);
+	changeSource();
 }
 
 
@@ -114,7 +116,7 @@ function setStat(str) {
 
 let code=undefined;
 
-function parse_script()
+function parseCode()
 {
   const ta = document.getElementById(textID);
   const k = new Lexer("{\n"+ta.value+"}");
@@ -122,3 +124,23 @@ function parse_script()
   //return Parse(k);
   code = new Parse(k);
 }
+
+function changeSource() 
+{
+	if (model) {
+		if (model.changed()===false) {
+			model.changed(true);
+			if (log) {console.log("Model changed");}
+			parseButton(0);
+		}
+	}
+}
+
+function parseButton(n) {
+	if (n===0) {
+		document.getElementById("parse").className="w3-button w3-teal";
+	} else {
+		document.getElementById("parse").className="w3-button w3-green";
+	}
+}
+

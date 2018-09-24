@@ -3,7 +3,7 @@
 
 function makeBold(input) {
  const keywords=["library","use","all","entity","port","in","out","is","begin","end", "architecture","downto","of",
-                 "signal","constant","process","if", "then", "else"];
+                 "signal","constant","process","if", "then", "else", "map", "time", "wait", "for"];
  return input.replace(new RegExp('(\\b)(' + keywords.join('|') + ')(\\b)','ig'), '$1<b class="w3-text-indigo">$2</b>$3');
 }
 
@@ -214,4 +214,111 @@ console.log("BLOK comb: "+combProc);
 	
 	s += "\nend RTL;";
 	document.getElementById("vhdllog").innerHTML = makeColor(makeBold(s));
+}
+
+function pad(bits, dolzina) {    
+    let str = '' + bits;
+    while (str.length < dolzina) {
+        str = '0' + str;
+    }
+    return str;
+}
+
+function TBout() {
+  const clk_per = document.getElementById("clk_per").value;
+  
+  let s = "library <b class='w3-text-brown'>IEEE</b>;\n";
+  s += "use <b class='w3-text-brown'>IEEE.std_logic_1164</b>.all;\n";
+  s += "use <b class='w3-text-brown'>IEEE.numeric_std</b>.all;\n\n"; 		
+  
+  var comp_name = document.getElementById("comp_name").value;
+  s += "entity" + " " + comp_name + "_tb is\n"; 
+  s += "end "+ comp_name +"_tb;\n";
+  s += "\narchitecture sim of" + " " + comp_name + "_tb " + "is" + "\n";
+  
+  if (isSequential()) {
+	s += " signal clk : std_logic:= '0';\n"
+  }
+    
+  let first=true;
+  model.vars.forEach(function (val, id) {
+	var tip = "unsigned";
+	var mod = mode(val); //val.getMode();
+	if (mod==="in" || mod==="out") {
+		if (type(val).unsigned===false) tip = "signed";
+		if (type(val).size===1) {tip = "std_logic";}
+			
+		s += " signal "; 
+		s += val.get().name + " " + ": " + tip;
+		if (type(val).size>1) {
+		  s += range(type(val).size); 
+		}
+		s += ";\n";
+	}
+  });
+  //s += "\n";    
+
+  
+  s += " constant T : time := " + clk_per + " ns;\n";
+  s += "begin\n" + "\nuut: entity <b class='w3-text-brown'>work</b>."+comp_name+" port map(\n";
+    
+  if (isSequential()) s += "     clk => clk,\n"
+  model.vars.forEach(function (val, id) {
+	var tip = "unsigned";
+	var mod = mode(val); //val.getMode();
+	if (mod==="in" || mod==="out") {
+		if (type(val).unsigned===false) tip = "signed";
+		if (type(val).size===1) {tip = "std_logic";}
+		if (first) { first=false; }
+		else {s += ",\n"; }
+		
+		s += "     "+val.get().name+" => "+val.get().name;
+	}
+  });   
+  s += "\n);\n";
+
+  if (isSequential()) {
+    s += "<span class='w3-text-green'>-- Clock generator\n</span>";
+	s += "clk_gen: process\nbegin\n clk <= '1';  wait for T/2;\n clk <= '0';  wait for T/2;\nend process;\n";
+  }
+
+  s += "\nstim_proc: process\nbegin\n wait for 0.5 ns;\n\n";  
+  
+  const cycles = getCycles();
+  const vrstice = ports.length;
+  let repeat = 0;
+  let change = false;
+  let wait = false;
+  
+  for (let c = 0; c < cycles; c++) {   
+    change = false;
+	wait = false;
+	for (let v = 0; v < vrstice; v++) {
+		// koda le ob spremembi vrednosti pri in ali inOut signalih 
+		if (c==0 ||(signals[v][c] != signals[v][c-1])) {
+		  if (c>0 && wait===false) {
+			  if (repeat===0) {s += "\n wait for T;\n";}
+			  else {s += "\n wait for "+(repeat+1)+"*T;\n";}
+			  repeat = 0;
+			  wait = true;
+		  }
+          if (ports[v].mode == "in" || ports[v].mode == "inOut") {					  
+			if (c>0) {change = true;}
+            if(ports[v] instanceof Bit) s += " " + ports[v].name + " <= " + "'" + signals[v][c].valueOf()+ "'" +";";
+            else {
+				bits = Number(signals[v][c])
+				if (bits<0) bits = bits & ( Math.pow(2, ports[v].size) - 1); 
+				bits = bits.toString(2);
+            
+				s += " " + ports[v].name + " <= " + "&quot" + pad(bits, ports[v].size) + "&quot" +"&#59;";
+            }
+          }
+		}
+	}
+	if (c>0 && change===false) {repeat += 1;}
+	
+  }
+  s += "\n wait;\nend process;\nend sim;";  
+  
+  document.getElementById("vhdllog").innerHTML = makeColor(makeBold(s));
 }

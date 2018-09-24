@@ -88,7 +88,9 @@ function getCycles() {  // število ciklov
 }
 
 function isSequential() { // sekvenčno vezje 
-  return document.getElementById("sequential").checked;
+  if (model) {return model.getSeq();}
+  return false;
+//  return document.getElementById("sequential").checked;
 }
 
 function setSignalAll(i, value) {
@@ -302,8 +304,8 @@ function graf_clear()  // pocisti platno
 function graf_labels()  // prikaz oznak grafikona in ure
 {	
 	var y1 = 60;
-	var sek = document.getElementById("sequential");
-	if (sek.checked) y1 = 14;
+	
+	if (isSequential()) y1 = 14;
 	
 	var x1 = 100; 
     var end = 70+30*ports.length; 
@@ -423,7 +425,6 @@ function graf_plot()  //izris vseh signalov v razpredelnici
 {
   var vvs = 20;
   var vns = 40;
-  var sequential = document.getElementById("sequential").checked;
 
   var nstart = wave.nstart(); // zacetek in konec risanja
   var nend = wave.nend();
@@ -431,7 +432,7 @@ function graf_plot()  //izris vseh signalov v razpredelnici
   console.log("plot: "+nstart+"-"+nend);
   
   if (ctx) { 	
-	if (sequential) { // risanje ure
+	if (isSequential()) { // risanje ure
 		ctx.font = "15px Verdana";
 		ctx.fillStyle = "gray"; //"#0000FF";
 		ctx.textAlign="end";
