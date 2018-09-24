@@ -50,43 +50,61 @@ function setHdlMode(v, mode) {
 }
 
 let item = [];  // temporary save variable identifiers
-const IO = 0;
-const FF = 1;
+
+let Resource={IO:0, FF:1, BOOL:2, ARIT:3, CMP:4, MUX:5};
 
 function Stat() {
 	let numIO = 0;
 	let numFF = 0;
+	let numBool = 0;
+	let numArit = 0;
+	let numCmp = 0;
+	let numMux = 0;
 	let io = new Set([]);
 	let ff = new Set([]);
 
 	function init() {
 		numIO = 0;
 		numFF = 0;
+		numBool = 0;
+		numArit = 0;
+		numCmp = 0;
+		numMux = 0;
 		io = new Set([]);
 		ff = new Set([]);
 	}
 	
 	function addID(id, set) { // add identifier to set
-		if (set===IO) {io.add(id)};
-		if (set===FF) {ff.add(id)};
+		if (set===Resource.IO) {io.add(id)};
+		if (set===Resource.FF) {ff.add(id)};
 	}
 	function getSet(set) { // get seleceted Set()
-		if (set===IO) {return io;}
-		if (set===FF) {return ff;}
+		if (set===Resource.IO) {return io;}
+		if (set===Resource.FF) {return ff;}
 	}
 	
-	function addNum(n, set) {
-		if (set===IO) {numIO += n;}
-		if (set===FF) {numFF += n;}		
+	function incNum(n, resource) {
+		switch (resource) {
+		 case Resource.IO: numIO += n; break;
+		 case Resource.FF: numFF += n; break;
+		 case Resource.BOOL: numBool += n; break;
+		 case Resource.ARIT: numArit += n; break;
+		 case Resource.CMP: numCmp += n; break;
+		 case Resource.MUX: numMux += n; break;
+		}
 	}
-	
+
 	function emit() {
 		let s = "I/O pins  : "+numIO+"<br>\n";
-		s += "Flip-flops: "+numFF;
+		s += "Flip-flops: "+numFF+"<br>\n";
+		s += "Log gates: "+numBool+"<br>\n";
+		s += "Arith op.: "+numArit+"<br>\n";
+		s += "Comp op.: "+numCmp+"<br>\n";
+		s += "Mux: "+numMux;
 		return s;
 	}
 	
-	return {init, addID, getSet, addNum, emit};
+	return {init, addID, getSet, incNum, emit};
 }
 
 stat = new Stat();
@@ -262,16 +280,16 @@ function Op(o, optType) { "use strict";
 	return vec.op(obj.op, obj.left.val(), obj.right.val());
  } 
 		
- function visit(verbose) { // visit op tree, set op id & return description string
+ function visit(statistics) { // visit op tree, set op id & return description string
 	let str = "";
 	let id2 = ""; // right (second) operand id
 	let no = 0;   // num of operands
 
 //console.log("BEGIN Op.Visit: "+obj.op+" type: '"+obj.type.id+"' "+obj.type.size+" "+obj.type.unsigned);	
-	if (obj.op==="" && verbose!==true) {		
+	if (obj.op==="") {		
 		str=" ";
 		if (obj.left!==null) {
-			str += obj.left.visit(verbose); 
+			str += obj.left.visit(statistics); 
 			no += obj.left.count();
 			obj.type.id = type(obj.left).id;//  obj.left.getType().type.id;
 			console.log("!!!Op type: "+obj.type.id);
@@ -310,14 +328,14 @@ function Op(o, optType) { "use strict";
 		
 		str = "(";
 		if (obj.left!==null) { // visit left
-			str += obj.left.visit(verbose); 
+			str += obj.left.visit(statistics); 
 			no += obj.left.count();
 			obj.type.id = type(obj.left).id;  // id(op) <= id(left)
 		}
 		str += " "+obj.op+" ";
 		if (obj.right!==null) { // visit right
 
-			str += obj.right.visit(verbose); 
+			str += obj.right.visit(statistics); 
 			no += obj.right.count();
 			id2 = type(obj.right).id;
 			if (obj.type.id==="") { // only one id set (single operand)
@@ -334,7 +352,16 @@ function Op(o, optType) { "use strict";
 			}
 		}
 		str += ")";
-		if (verbose) {str += " type: "+obj.type.id+" "+typeToString(obj.type);} 
+		if (statistics===true) { // compute operation statistics
+			str += " type: "+obj.type.id+" "+typeToString(obj.type);
+			if (obj.op==="&" || obj.op==="|" || obj.op==="^" || obj.op==="~") {
+				stat.incNum(obj.type.size, Resource.BOOL);
+			} else if (obj.op==="+" || obj.op==="-" || obj.op==="*") {
+				stat.incNum(1, Resource.ARIT);
+			} else if (isComparisonOp(obj.op)) { 
+				stat.incNum(1, Resource.CMP);
+			}
+		} 
 	}
 	numOperands = no;
 //console.log("END Op.Visit: "+obj.op+" type: '"+obj.type.id+"' "+obj.type.size+" "+obj.type.unsigned);
@@ -605,7 +632,7 @@ console.log("Statement.visit: "+pass);
 		
 		if (obj.id==="=" || obj.id==="<=") {
 			if (pass===1) { // first pass, indentify number & type of assignments, count operands			
-			    if (obj.id==="<=") {stat.addID(obj.target.get().name, FF);} // save id
+			    if (obj.id==="<=") {stat.addID(obj.target.get().name, Resource.FF);} // save id
 				
 				let assignop = hdl(obj.target).assignop;			
 				if ((assignop==="=" && obj.id==="<=") || (assignop==="<=" && obj.id==="=")) {

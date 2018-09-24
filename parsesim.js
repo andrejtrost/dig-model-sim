@@ -236,7 +236,8 @@ function Parse(k) {
 			console.log("Sum type: "+u+" "+sz);		
 		}
 		
-		if (log) {console.log(x.visit(true));}
+		let logstr = x.visit(true);   // visit operator for statistics
+		if (log) {console.log(logstr);}  
 		return x;
 	}
 	
@@ -307,7 +308,9 @@ function Parse(k) {
 				e = new Op({op:o, left:e, right:null}, type(e)); // TODO: check
 			}										
 			e.right(new NumConst(0));		
-		}			
+		}
+		
+		let logstr = e.visit(true);   // visit operator for statistics
 		return e;
 	}
 	
@@ -435,6 +438,8 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	
   try {	  
 	  clearLog();
+	  stat.init();
+	  
 	  let t = peek();
 	 	
 	  parseBlock(circ);
@@ -443,15 +448,25 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		setLog(parseErr("Unexpected code after block end!"));
 		//console.log(t.pos()+" Unexpected circ after block end! "+peek().id);
 	  }
-	  
-	  stat.init();
-	  
+	  	  
 	  let logStr=circ.visit(1); // visit, first pass
 	  
-	  // get statistics
-	  stat.getSet(FF).forEach(function(id) {
-	      stat.addNum(type(circ.getVar(id)).size, FF);
+	  // get statistics, number of FF
+	  stat.getSet(Resource.FF).forEach(function(id) {
+	      stat.incNum(type(circ.getVar(id)).size, Resource.FF);
 	  });
+	  
+	  circ.vars.forEach(function (val, id) { // count I/O
+		var mod = mode(val); //val.getMode();
+		if (mod==="in" || mod==="out") {
+			stat.incNum(type(val).size, Resource.IO);
+		}
+		if (hdl(val).assignments>1) {
+			stat.incNum(1, Resource.MUX);
+		}
+		
+	  });
+	  
 	  setStat(stat.emit());	  
 	  
 	  if (log) {
