@@ -456,13 +456,35 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	  	  
 	  let logStr=circ.visit(1); // visit, first pass
 	  
-	  // get statistics, number of FF
-	  stat.getSet(Resource.FF).forEach(function(id) {
+	  stat.getSet(Resource.FF).forEach(function(id) {  // calculate number of FFs
 	      stat.incNum(type(circ.getVar(id)).size, Resource.FF);
 	  });
 	  
-	  circ.vars.forEach(function (val, id) { // count I/O
+	  // check ports usage, note: in used as out checked at assignment visit,
+	  //   out used as inout solved at 2nd pass visit
+	  circ.ports.forEach(function (val, id) { 
+		var v = circ.getVar(id);
+		var mod = mode(v);
+		if (mod==="out" && hdl(v).mode==="in") {  // wrong declaration or usage
+			setLog(formatErr("Variable: "+id+" should be declared as input!"));
+		}
+	  });
+	  
+	  // vars check and I/O resource usage
+	  circ.vars.forEach(function (val, id) {
 		var mod = mode(val); //val.getMode();
+		var mod1 = hdl(val).mode;
+		if (mod1===undefined) {mod1 = "";}
+		if (mod==="") { // test internal signals			
+			if (mod1==="" || mod1==="out") {
+				// TODO: remove
+				setLog("Note: unused variable: "+id);
+			}
+			if (mod1==="in") {
+				setLog("Note: variable: "+id+" should be declared as input!");
+			}
+			
+		}		
 		if (mod==="in" || mod==="out") {
 			stat.incNum(type(val).size, Resource.IO);
 		}

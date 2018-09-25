@@ -51,7 +51,7 @@ function setHdlMode(v, mode) {
 
 let item = [];  // temporary save variable identifiers
 
-let Resource={IO:0, FF:1, BOOL:2, ARIT:3, CMP:4, MUX:5};
+let Resource={IO:0, FF:1, BOOL:2, ARIT:3, CMP:4, MUX:5, IOID:6};
 
 function Stat() {
 	let numIO = 0;
@@ -60,7 +60,7 @@ function Stat() {
 	let numArit = 0;
 	let numCmp = 0;
 	let numMux = 0;
-	let io = new Set([]);
+	let io = new Set([]); // I/O variables
 	let ff = new Set([]);
 
 	function init() {
@@ -391,7 +391,12 @@ function Op(o, optType) { "use strict";
 		if (obj.left!==null) {
 			console.log("A1 "+type(obj.left).size+" "+obj.type.size);
 			if (type(obj.left).size !== obj.type.size) { // left size <> op size, set by Statement.visit (NOTE)
-				str += resizeVar(obj.left.emitVHD(), obj.type.size, type(obj.left).size);	
+// check if numeric variable
+				if (type(obj.left).id==="num") {
+					str += obj.left.emitVHD();
+			    } else {				
+					str += resizeVar(obj.left.emitVHD(), obj.type.size, type(obj.left).size);	
+				}
 			} else {
 				str += obj.left.emitVHD();
 			}
@@ -663,13 +668,14 @@ console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(o
 				
 			} else {  // second pass
 				if (obj.expr.count()===1) {  // single assignment to num => constant
-					if ((type(obj.expr).id==="num") && (hdl(obj.target).assignments===1)) {
-//console.log("Statement.visit: as="+(hdl(obj.target).assignments===1));					
+					if ((type(obj.expr).id==="num") && (hdl(obj.target).assignments===1)
+						&& mode(obj.target)!=="out") {
 						obj.target.set({hdl: {mode:"const", val:vec.out(obj.expr.val())}});
 						obj.translated = true;// exclude from translation to VHDL statements
 					}
 				}
-				if (hdl(obj.target).mode==="inout") { // out signal used as inout
+				// out signal used as inout
+				if (mode(obj.target)==="out" && hdl(obj.target).mode==="inout") { 
 					const old = obj.target;
 					
 					old.set({hdl: {mode: "out"}});

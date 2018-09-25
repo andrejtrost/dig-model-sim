@@ -293,9 +293,12 @@ function TBout() {
   for (let c = 0; c < cycles; c++) {   
     change = false;
 	wait = false;
+
 	for (let v = 0; v < vrstice; v++) {
 		// koda le ob spremembi vrednosti pri in ali inOut signalih 
-		if (c==0 ||(signals[v][c] != signals[v][c-1])) {
+		if (c==0 ||
+		   ((ports[v].mode == "in" || ports[v].mode == "inOut") && signals[v][c] != signals[v][c-1])) {
+//console.log("Cy: "+c+" change "+repeat);				
 		  if (c>0 && wait===false) {
 			  if (repeat===0) {s += "\n wait for T;\n";}
 			  else {s += "\n wait for "+(repeat+1)+"*T;\n";}
