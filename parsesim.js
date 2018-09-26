@@ -78,10 +78,30 @@ function Circuit() {
 	return changeNext;
  }
  
- function val() {	 // evaluate (simulate) one cycle
-	 let iter = 1;
-	 let change = valDelta(true);
-	 
+ function val(i) {	 // evaluate (simulate) one cycle
+	let iter = 1;
+	let change = true;
+	
+	let s = getInValues(i-1);  // read input(i-1)
+	if (s===undefined) {return;}
+	
+	s.forEach(function (val, id) {		
+		let v = getVar(id);
+		v.setVal(vec.parse(val));
+	});	 
+	
+	change = valDelta(true); // first delta, sequential
+	
+	s = getInValues(i);  // read input (i)
+	if (s===undefined) {return;}
+	
+	s.forEach(function (val, id) {		
+		v = getVar(id);
+		v.setVal(vec.parse(val));
+	});	
+	
+	change = valDelta(false); // second delta, combinational
+	
 	 while (change && iter<MAXITER) {
 		//if (log) {console.log("--- new cycle");}
 		change = valDelta(false);
@@ -91,6 +111,8 @@ function Circuit() {
 	 if (iter>=MAXITER) {
 		 throw runErr("Simulation infinite loop!");
 	 }
+	 
+	return true;
  }
  
  function visit(pass) { // visit block, set pass number and give access to vars
@@ -257,7 +279,7 @@ function Parse(k) {
 		let v = circ.getVar(id);   // get output var
 		
 		if (mode(v)==="in") {
-			throw parseErr("Error: Assignment target: '"+id+"' is input signal!");
+			throw parseErr("Assignment target: '"+id+"' is input signal!");
 		}
 		
 		
@@ -305,14 +327,20 @@ function Parse(k) {
 			let u = type(e).unsigned && type(e2).unsigned;
 			e.set({type: {unsigned: u, size: sz}});
 
-		} else { // add required operator (value != 0)
+		} else { // add required operator (value != 0)			
 			let o = "!=";
+			let rightObj = new NumConst(0); 
+			
+			if (type(e).size===1) { // ==1, if expression is one bit
+				o = "==";
+				rightObj = new NumConst(1);
+			} 
 			if (e.getOp()==="") { // prazna operacija
 				e.op(o);
 			} else {
 				e = new Op({op:o, left:e, right:null}, type(e)); // TODO: check
 			}										
-			e.right(new NumConst(0));		
+			e.right(rightObj);
 		}
 		
 		let logstr = e.visit(true);   // visit operator for statistics
@@ -450,8 +478,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	  parseBlock(circ);
 	  t = peek();
 	  if (!(peek().isEOF())) {
-		setLog(parseErr("Unexpected code after block end!"));
-		//console.log(t.pos()+" Unexpected circ after block end! "+peek().id);
+		setLog(parseErr("Misplaced end of code block \"}\""));
 	  }
 	  	  
 	  let logStr=circ.visit(1); // visit, first pass
@@ -501,8 +528,6 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		console.log("Sequential: "+circ.getSeq());
 		console.log("Signals: ");
 		circ.vars.forEach(function(v) {
-			//v.setName(v.get().name+"1");  TODO preimenuj
-			
 			console.log(v.visit()+" "+type(v).id+" val="+vec.out(v.val(), type(v).unsigned)+" mode="+mode(v)+" type="+typeToString(type(v))+
 			" "+type(v).id+" hdl="+hdl(v).mode+" ");
 		});
@@ -523,18 +548,12 @@ function runCycle(tree, i) {
   try {
 	console.log("Run cycle "+i);
 	
-	let s = getInValues(i);//getSignals(i);
-	if (s===undefined) {
+	let result = tree.val(i); // simulate, cycle: i
+	if (result===undefined) {
 		console.log("Run cycle: End.");
 		return false;
 	}
 	
-	s.forEach(function (val, id) {		
-		let v = tree.getVar(id);
-		v.setVal(vec.parse(val));
-	});
-	
-	tree.val();
 	tree.ports.forEach(function (p, id) {
 		if (tree.vars.has(id)) {
 			if (p.mode==="out") {
@@ -560,6 +579,8 @@ function run()
   let res = false;
   
   if (model===undefined) {return;}
+  if (model.changed()) {parseCode();}
+  
   //else {console.log(tree);}
   setLog("Run...");  
   

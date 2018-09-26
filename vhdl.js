@@ -187,6 +187,8 @@ function searchSeq(b) {
 function VHDLout() {
 	let combProc = false;
 	if (model) {
+	  if (model.changed()) {parseCode();}	// recompile on change
+		
 	  // mark comb if statements
 	  let b = model.getBlok();
 	  combProc = searchComb(b, 0);
@@ -225,9 +227,18 @@ function pad(bits, dolzina) {
 }
 
 function TBout() {
+  let s = "";
+  
+  if (model) {
+	if (model.changed()) {parseCode();}	// recompile on change
+  } else {
+	 document.getElementById("vhdllog").innerHTML = "";
+	 return;
+  }
+	  
   const clk_per = document.getElementById("clk_per").value;
   
-  let s = "library <b class='w3-text-brown'>IEEE</b>;\n";
+  s += "library <b class='w3-text-brown'>IEEE</b>;\n";
   s += "use <b class='w3-text-brown'>IEEE.std_logic_1164</b>.all;\n";
   s += "use <b class='w3-text-brown'>IEEE.numeric_std</b>.all;\n\n"; 		
   

@@ -43,19 +43,19 @@ function Wave() {  // podatkovna struktura za grafikon, funkcije: zoom, ID=slide
 	 
 	switch (zoomf) {    
 	    case 2: 
-		  txt = "500%"; wdx=100; viewcycles=cycles100/5; line=1; 
+		  txt = "500%"; wdx=100; viewcycles=cycles100/5; wline=1; 
 		  break;
 		case 1: 
-		  txt = "200%"; wdx=40; viewcycles=cycles100/2; line=1; 
+		  txt = "200%"; wdx=40; viewcycles=cycles100/2; wline=1; 
 		  break;
 		case -1: 
-		  txt = " 50%"; wdx=10; viewcycles=cycles100*2; line=5; 
+		  txt = " 50%"; wdx=10; viewcycles=cycles100*2; wline=5; 
 		  break;
 		case -2: 
-		  txt = " 25%"; wdx=5; viewcycles=cycles100*4; line=10; 
+		  txt = " 25%"; wdx=5; viewcycles=cycles100*4; wline=10; 
 		  break;
 		default: 
-		  txt = "100%"; wdx=20; viewcycles=cycles100; line=2;
+		  txt = "100%"; wdx=20; viewcycles=cycles100; wline=2;
 	}
 	
     setView(wnstart);
@@ -138,7 +138,9 @@ function Vec(name, mode, type, size) {
 
 function graf_init() { // inicializacija, ID=slide, sliderAmount, slide.onchange()
  var canvas = document.getElementById(canvasID);
- canvas.addEventListener('click', graf_click, false); //mousedown, mouseup
+ 
+ canvas.addEventListener('mousemove', graf_click, false);
+ canvas.addEventListener('mousedown', graf_click, false); //mousedown, mouseup
  //canvas.addEventListener('mouseup', graf_click, false);
  canvas.addEventListener('keydown', graf_move);
  
@@ -273,7 +275,11 @@ function getInValues(i) {
 	
 	ports.forEach(function (p, n) {		
 		id = p.name;
-		val =  signals[n][i].valueOf();
+		if (i<0) {
+			val = 0;
+		} else {
+			val = signals[n][i].valueOf();
+		}
 		if (p.mode ==="in") {
 			sig.set(id, val);
 		}
@@ -486,8 +492,14 @@ function graf() {  // risanje grafa
   graf_plot();     // risanje signalov
 }
     
+var firstClickVal = 0; // save value on mousedown	
+	
 // servis dogodka click, spremeni vrednost signala
 function graf_click(e) { 	
+	var clickType = (e.type==="mousedown") ? 1 : 0;  // mouse key down or move
+	
+	if (clickType===0 && (e.buttons & 1)!==1) return;
+
 	var rect = document.getElementById(canvasID).getBoundingClientRect(); // okvir
 	var cursorX = e.clientX - rect.left;
 	var cursorY = e.clientY - rect.top;
@@ -509,28 +521,29 @@ function graf_click(e) {
 	
 	// Sprememba celotnega signala ob kliku na ime signala
     if (cx0==-1 && cy>=0 && cy<vrstice) {
-	  
-	  var value=0;
-	  var limit=false;
-	  if (signals[cy][0] == 0) {
-		if (ports[cy] instanceof Vec) {
-            if (bus>=ports[cy].min && bus<=ports[cy].max) value = bus;
-		    else limit=true;
-		} else value=1;
-	  }
-	  
-	  if (limit) { alert("Value out of limits!") }
-	  else {	  
-	   var r = confirm("SET "+ports[cy].name+" = "+value+" ?");
-	  
-	   if (r == true) {
-		for (c = 0; c < cycles; c++) signals[cy][c] = value;
-		graf();
-	   }
+	  if (clickType===1 && ports[cy].mode==="in") {
+		  var value=0;
+		  var limit=false;
+		  if (signals[cy][0] == 0) {
+			if (ports[cy] instanceof Vec) {				
+				if (bus>=ports[cy].min && bus<=ports[cy].max) value = bus;
+				else limit=true;
+			} else value=1;
+		  }
+		  
+		  if (limit) { alert("Value out of limits!") }
+		  else {	  
+		   var r = confirm("SET "+ports[cy].name+" = "+value+" ?");
+		  
+		   if (r == true) {
+			for (c = 0; c < cycles; c++) signals[cy][c] = value;
+			graf();
+		   }
+		  }
 	  }
 	} else // Sprememba vrednosti posameznih ciklov
 	
-	if (cx>=nstart && cx<nend && cy>=0 && cy<vrstice) {        
+	if (cx>=nstart && cx<nend && cy>=0 && cy<vrstice && ports[cy].mode==="in") {        
         if (ports[cy] instanceof Vec)  {
             if (bus>=ports[cy].min && bus<=ports[cy].max) {
 				signals[cy][cx] = bus;
@@ -538,9 +551,13 @@ function graf_click(e) {
 			} else {
                 alert("Value out of limits: "+ports[cy].min+" .. "+ports[cy].max);
             }
-        } else {        
-			if (signals[cy][cx] == 0) signals[cy][cx] = 1;
-			else signals[cy][cx] = 0;
+        } else {
+			if (clickType===1) { // click
+				if (signals[cy][cx] == 0) firstClickVal = 1;
+				else firstClickVal = 0;
+			}
+			
+			signals[cy][cx] = firstClickVal;
 			graf();
         }             
    }       
