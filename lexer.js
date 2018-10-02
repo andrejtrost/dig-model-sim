@@ -1,34 +1,39 @@
-/*File: lexer.js */
+/*File: lexer.js, HL model lexer */
 /*jshint esversion: 6 */
+
 function isIDStart(ch) {
  return (ch === "_") || (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z");
 }
 
 function isIDchar(ch) {
-	return (ch === "_") || (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || 
-	       ((ch >= "0") && (ch <= "9"));
+ return (ch === "_") || (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || 
+        ((ch >= "0") && (ch <= "9"));
 }
 
 function isDigit(ch) {
-	return (ch >= "0" && ch <= "9");
+ return (ch >= "0" && ch <= "9");
+}
+
+function isHexDigit(ch) {
+ return (ch >= "0" && ch <= "9") || (ch >= "a" && ch <= "f") || (ch >= "A" && ch <= "F");
 }
 
 function isComparisonOp (s) {
-	return s.match(/^(>|<|==|>=|<=|!=)$/);
+ return s.match(/^(>|<|==|>=|<=|!=)$/);
 }
 
-function Token(tokenName, tokenType, position) {
+function Token(tokenName, tokenType, position, numFormat) {
  const id = tokenName;
  const type = tokenType;
  const xy = position;
-
+ const fmt = numFormat;  // number format: 0=decimal, 1=binary, 2=hex
+ 
  function isID() {return (type==="id");}
  function isNum() {return (type==="num");} 
  function isAssign() {return (type==="=");} 
  function isOp() {return (type==="op");}
  
  function isSeparator(){return (type==="\n") || (type===";") || (type==="\t");}
- //function isEnd() {return (type==="") || (type==="\n") || (type===";");}
  function isEOF() {return (type==="");}
  function isComparison() {return (type==="co");}
  
@@ -36,10 +41,10 @@ function Token(tokenName, tokenType, position) {
  function pos() {
 	return xy.y+":"+xy.x;
  }
-
+ function format() { return fmt; }
 // console.log("Token: '"+id+"' "+position.y+","+position.x); 
  
- return {id, isID, isNum, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos};
+ return {id, isID, isNum, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos, format};
 }
 
 
@@ -73,7 +78,6 @@ function Lexer(txt) {
 	function scan() {	
 		let z;
 		const pos0 = Object.assign({}, pos);
-        //console.log("Pos0: "+pos0.y+","+pos0.x);		
 		
 		token = look;
 		if (index>=len) { // end of source
@@ -81,12 +85,24 @@ function Lexer(txt) {
 			return;
 		}
 		
-		 // create(pos);
-		
 		if (isDigit(nextCh)) {			
-			z = getCh();			
-			while (isDigit(nextCh)) {z += getCh();}
-			look = new Token(z, "num", pos0);
+			z = getCh();
+			if ((z==="0") && (nextCh==="x" || nextCh==="X")) { // HEX ?
+			   getCh();
+			   z = "";
+			   while (isHexDigit(nextCh)) {z += getCh();}
+			   if (z!=="") { look = new Token(parseInt(z, 16), "num", pos0, 2); } 
+			   else { look = new Token("0x", "?", pos0); }
+			} else if ((z==="0") && (nextCh==="b" || nextCh==="B")) { // BIN ?
+			   getCh();
+			   z = "";
+			   while (nextCh==="0" || nextCh==="1") {z += getCh();}
+			   if (z!=="") { look = new Token(parseInt(z, 2), "num", pos0, 1); } 
+			   else { look = new Token("0b", "?", pos0); }			   
+			} else {			
+			  while (isDigit(nextCh)) {z += getCh();}
+			  look = new Token(z, "num", pos0, 0);
+			}
 		} else if (isIDStart(nextCh)) {
 			z = getCh();
 			while (isIDchar(nextCh)) {z += getCh();}			
@@ -178,9 +194,7 @@ function Lexer(txt) {
 		}
 	}
 	
-	function peek() {
-		//console.log("peek: "+token.emit());
-		return look;}
+	function peek() { return look; }
 	
 	function consume() {
 		scan();

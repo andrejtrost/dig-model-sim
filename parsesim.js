@@ -12,22 +12,24 @@ let vec=new Vector();
 
 function Circuit() {
  let b = new Blok("new");
- let vars = new Map(); 	
- let ports = getPorts();  // read ports from table
+ let vars = new Map(); 
+ let ports = getPorts();
  let sequential = false;
  let srcChanged = false;     // input source changed after parsing
  
- function runErr(s) {return "<span style='color: red;'>Runtime Error </span>: "+s;} 
+ function runErr(str) {
+	const er = (english) ? "Runtime Error: " : "Napaka izvajanja: ";
+	return "<span style='color: red;'>"+er+"</span>"+errTxt(str);
+ } 
  
- function getVar(id) {
+ function getVar(id) {  // get or create new Var 
 //console.log("Cir.getVar "+id);
-	 if (!vars.has(id)) {     // create new var				
+	 if (!vars.has(id)) {			
 		let v = new Var(id);		
-		if (ports.has(id)) { // exist in ports
-//console.log("exists"+ports.get(id).type.size);
-			v.set({type: ports.get(id).type});		//setType old
-			v.set({mode: ports.get(id).mode});      //setMode old
-		} else {              // set type from global setup
+		if (ports.has(id)) { // get type & mode from ports
+			v.set({type: ports.get(id).type});
+			v.set({mode: ports.get(id).mode});
+		} else {             // ...or from global setup
 			v.set({type: getDefaultType()});
 		}
 		vars.set(id, v);
@@ -35,7 +37,7 @@ function Circuit() {
 	 return vars.get(id);
  }
 
- function setVar(id, value) {
+ function setVar(id, value) { // Todo: remove ?
 	t = vars.get(id);
 	if (t!==undefined) {
        console.log("setVar");		
@@ -73,7 +75,6 @@ function Circuit() {
 		if (v.next()) {changeNext = true;}
 		});
 	}
-	//console.log("changeNext: "+changeNext);
 	
 	return changeNext;
  }
@@ -103,13 +104,12 @@ function Circuit() {
 	change = valDelta(false); // second delta, combinational
 	
 	 while (change && iter<MAXITER) {
-		//if (log) {console.log("--- new cycle");}
 		change = valDelta(false);
 		iter += 1;
 	 }
 	 
 	 if (iter>=MAXITER) {
-		 throw runErr("Simulation infinite loop!");
+		 throw runErr("inf");
 	 }
 	 
 	return true;
@@ -141,75 +141,66 @@ function Circuit() {
 
 
 function Parse(k) {
-    let circ = new Circuit();
+    let circ = undefined;
 	
 	function peek() {return k.peek();}  
 	function consume() {return k.consume();}
-	function parseErr(s) {return "<span style='color: red;'>Parse Error </span>at "+peek().pos()+": "+s;} 
+	function parseErr(str, id) {
+		const er = (english) ? "Parse Error " : "Napaka ";
+		const er1 = (english) ? "at " : "v ";
+		return "<span style='color: red;'>"+er+"</span>"+er1+peek().pos()+": "+errTxt(str, id);
+	} 	
 	
-	
-	function factor(n) { //expect identifier, number or unary
+	function factor(n) { // expression factor (id, num ())
 		let t=peek();
 		
-		if (t.id==="-" || t.id==="~") { // unary 
+		if (t.id==="-" || t.id==="~") { // unary operator
 			consume();
 			if (peek().isID()) {				
 				let v = circ.getVar(consume().id);
 				n.op(t.id);
-				n.right(v);
-				
-				n.set({type: type(v)});
-				
-				///n.setType(v.getType());				
+				n.right(v);				
+				n.set({type: type(v)});				
 				return n;
-				//return new Op({op:t.id, left:null, right:v});
 			}
 			if (peek().isNum()) {
 				v = new NumConst("-"+consume().id);
 				n.op(t.id);
 				n.right(v);
 				n.set({type: type(v)});
-				///n.setType(v.getType());				
 				return n;				
-				
-				//return new NumConst("-"+consume().id);
-				
 			}
-			throw parseErr("Expected identifier or number after unary operator!");
+			throw parseErr("expvn"); //Expected variable identifier or number
 		}
-		else if (t.isID()) { // save variable & set op type
+		else if (t.isID()) { // identifier, save variable & set op type
 			let v = circ.getVar(consume().id); 
 			n.left(v);
 			n.set({type: type(v)});
-			///n.setType(v.getType());
 			return n;
-			//console.log("Varname: "+varname);
-			//return circ.getVar(consume().id);
 		}
-		else if (t.isNum()) { 
+		else if (t.isNum()) { // number
 			let num = new NumConst(consume().id); 
 			n.left(num); 			
 			n.set({type: type(num)});
 			return n;
-		    //return new NumConst(consume().id); 
 		}
-		else if (t.id === "(") {
+		else if (t.id === "(") { // braces with new expression
 			consume();
 			let e = expression(n);
 			if (peek().id===")") { consume(); }
 			else { 
-			  throw parseErr("Expected )!"); 
+			  throw parseErr("exp",")"); // Expected ) 
 			}
 			return e;					
-		} else { throw parseErr("Expected identifier or number! ("+t.id+")"); }
+		} else { 
+			throw parseErr("expvn"); //Expected identifier or number
+		}
 	}
 	
-	function term(n) {  // test the operation !
+	
+	function term(n) {  // expression term 
 		let f = factor(n);
 		if (f === undefined) {return;}
-		
-		/*let y = new Op({op:"", left:f, right:null});
-		y.setType(f.getType());*/
 						
 		while (peek().id==="*" || peek().id==="&") {
 			let o = consume().id;
@@ -223,10 +214,21 @@ function Parse(k) {
 			// second factor
 			let f2 = factor(new Op({op:"", left:null, right:null})); 
 			f.right(f2);
-			let sz = Math.max(type(f).size, type(f2).size);
+			
+			const sz1 = type(f).size;
+			const sz2 = type(f2).size;
+			let sz = Math.max(sz1, sz2);
+			if (o==="*") {
+				if (sz1===1 && sz2===1) { 
+					f.op("&");
+					sz = 1; 
+				} else { 
+					sz = sz1 + sz2;
+				}
+			}
+			
 			let u = type(f).unsigned && type(f).unsigned;
-			f.set({type: {unsigned: u, size: sz}});	
-				
+			f.set({type: {unsigned: u, size: sz}});					
 			console.log("Term type: "+u+" "+sz);			
 		}
 		
@@ -245,7 +247,6 @@ function Parse(k) {
 			if (x.getOp()==="") { // set empty or create new operation
 				x.op(o);
 			} else {
-				//console.log(type(x));
 				x = new Op({op:o, left:x, right:null}, type(x));				
 			}
 			
@@ -258,9 +259,8 @@ function Parse(k) {
 			console.log("Sum  "+sz);
 			if (o==="+" || o==="-") {sz += 1;}			
 			let u = type(x).unsigned && type(x2).unsigned;
-			x.set({type: {unsigned: u, size: sz}});	
-				
-			console.log("Sum type: "+u+" "+sz);		
+			x.set({type: {unsigned: u, size: sz}});					
+			//console.log("Sum type: "+u+" "+sz);		
 		}
 		
 		let logstr = x.visit(true);   // visit operator for statistics
@@ -268,26 +268,17 @@ function Parse(k) {
 		return x;
 	}
 	
-	function assignment(id, op, pos) // beri in kodiraj prireditev
+	
+	function parseAssign(v, op, pos) // assignment expression (take var v)
 	{
-		let a = new Statement(op); // define assignment statement		
-		a.set({pos: pos});
-		
-		
-		a.set({level: Number(circ.getBlok().get().level)});	
-//console.log("ASSIGN "+id+" level:"+Number(circ.getBlok().get().level));		
-		let v = circ.getVar(id);   // get output var
-		
-		if (mode(v)==="in") {
-			throw parseErr("Assignment target: '"+id+"' is input signal!");
-		}
-		
-		
-		a.setTarget(v);		
+		let a = new Statement(op);  // statement, define target, position and level
+		a.setTarget(v);
+		a.set({pos: pos});				
+		a.set({level: Number(circ.getBlok().get().level)});		
+		stat.setPos(pos);
 		
 		// opnode
-		let node = new Op({op:"", left:null, right:null});
-		
+		let node = new Op({op:"", left:null, right:null});		
 		node = expression(node);
 
 		if (node === undefined) {return;}
@@ -299,7 +290,7 @@ function Parse(k) {
 	function takeToken(id) {	
 		if (peek().id === id) {consume();}
 		else {
-			throw parseErr("Unexpected: "+peek().id+", expected: '"+id+"'!");
+			throw parseErr("exp",id);
 		}
 
 	}
@@ -383,10 +374,12 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		while (peek().isSeparator()) {consume();}
 	}
 	
-	function parseIf()
+	function parseIf(pos)
 	{		
 		let ifst = new Statement("if");
-		ifst.set({level: Number(circ.getBlok().get().level)});	
+		ifst.set({level: Number(circ.getBlok().get().level)});
+		ifst.set({pos: pos});
+		stat.setPos(pos);
 		
 		let ifblok = new Blok("if");		
 		let elseBlok = null;
@@ -427,25 +420,31 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		
 		if (t.isID()) { // identifier
 		  let pos = t.pos();
-		  let id = consume().id;
+		  let id = peek().id;
 		  
-		  if (peek().isAssign()) {  // expect assignment
-		    
+		  let v = circ.getVar(id);   // get output var		
+			if (mode(v)==="in") {
+				throw parseErr("tin", id); //Assignment target: '"+id+"' is input signal!");
+			}			  
+		  consume();
+		  
+		  if (peek().isAssign()) {  // expect assignment		  
 			let op = consume().id;
-			statement = assignment(id, op, pos); // return statement or undefined
+			statement = parseAssign(v, op, pos); // return statement or undefined
 						
 			if (op==="<=") {circ.setSeq(true);}
 		  } else { 
-			throw parseErr("Unexpected token: '"+peek().id+"'!");
+			throw parseErr("unexp", peek().id);  //"Unexpected token: '"+peek().id+"'!"
 		  }		  
-		} else if (t.id==="if") { 
+		} else if (t.id==="if") {
+			let pos = t.pos();			
 			consume();			
-			statement = parseIf(); // return statement or undefined 
+			statement = parseIf(pos); // return statement or undefined 
 		} else if (t.id==="{") {
-			throw parseErr("Misplaced {!");			
+			throw parseErr("unexp", "{");			
 		} else if (t.id==="}") {   // return witout parsing
 		} else {
-			if (!t.isEOF()) { throw parseErr("Unexpected token: '"+t.id+"'!"); }
+			if (!t.isEOF()) { throw parseErr("unexp", t.id); }//parseErr("Unexpected token: '"+t.id+"'!"); }
 		}
       
 		return statement;		
@@ -471,6 +470,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	
   try {	  
 	  clearLog();
+	  circ = new Circuit();
 	  stat.init();
 	  
 	  let t = peek();
@@ -493,7 +493,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		var v = circ.getVar(id);
 		var mod = mode(v);
 		if (mod==="out" && hdl(v).mode==="in") {  // wrong declaration or usage
-			setLog(formatErr("Variable: "+id+" should be declared as input!"));
+		    throw modelErr("vin", id); // Signal should be declared as input
 		}
 	  });
 	  

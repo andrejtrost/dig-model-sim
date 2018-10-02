@@ -11,15 +11,9 @@
 
 const log = true;
 const logval = true;
-const logset = true;
+const logset = false;
 
 // util functions
-function formatErr(s, pos) {
-	let str = "<span style='color: red;'>Error </span>";
-	if (pos!==undefined) {str += "at "+pos+": ";}
-	str += s;
-	return str;
-} 
 // get variable object and return mode, type
 function mode(v) {return v.get().mode;}
 function type(v) {
@@ -49,11 +43,9 @@ function setHdlMode(v, mode) {
 	}
 }
 
-let item = [];  // temporary save variable identifiers
-
 let Resource={IO:0, FF:1, BOOL:2, ARIT:3, CMP:4, MUX:5, IOID:6};
 
-function Stat() {
+function Stat() {    // statistics and tmp values
 	let numIO = 0;
 	let numFF = 0;
 	let numBool = 0;
@@ -62,7 +54,9 @@ function Stat() {
 	let numMux = 0;
 	let io = new Set([]); // I/O variables
 	let ff = new Set([]);
-
+	let item = [];        // temporary save variable identifiers
+	let pos = {x:0, y:0}; // model visit position
+	
 	function init() {
 		numIO = 0;
 		numFF = 0;
@@ -73,6 +67,13 @@ function Stat() {
 		io = new Set([]);
 		ff = new Set([]);
 	}
+	
+	function initItem() { item = []; }	
+	function pushItem(o) { item.push(o); }
+	function getItem() { return item;}
+	
+	function setPos(p) { pos = p; }
+	function getPos() { return pos;}
 	
 	function addID(id, set) { // add identifier to set
 		if (set===Resource.IO) {io.add(id)};
@@ -104,13 +105,14 @@ function Stat() {
 		return s;
 	}
 	
-	return {init, addID, getSet, incNum, emit};
+	return {init, initItem, pushItem, getItem, setPos, getPos, addID, getSet, incNum, emit};
 }
 
-stat = new Stat();
+stat = new Stat(); // global status object, resource statistics and global tmp values
 
-function NumConst(n) { "use strict";
-	let num = Number(n);	
+function NumConst(n, fmt) { "use strict";
+	let num = Number(n);
+	const format = fmt;
 	let value = [num, 0];
 	let obj = {unsigned:true, size:0};
 	
@@ -125,7 +127,7 @@ function NumConst(n) { "use strict";
 
 	function val() {return value;}	
 	function get() {
-		return {type: {id:"num", unsigned:obj.unsigned, size:obj.size}};
+		return {type: {id:"num", unsigned:obj.unsigned, size:obj.size}, format:format};
 	}
 	
     function visit() {return value[0].toString();}
@@ -230,7 +232,7 @@ function Var(s) { "use strict";
  }
  
  function visit() {
-	 item.push(obj.name);
+	 stat.pushItem(obj.name);
 	 return obj.name;
  }
  function emitVHD() {return obj.name;}
@@ -292,7 +294,7 @@ function Op(o, optType) { "use strict";
 			str += obj.left.visit(statistics); 
 			no += obj.left.count();
 			obj.type.id = type(obj.left).id;//  obj.left.getType().type.id;
-			console.log("!!!Op type: "+obj.type.id);
+			//console.log("!!!Op type: "+obj.type.id);
 		}
 	} else {
 		if (isComparisonOp(obj.op)) { // test comparison
@@ -302,23 +304,25 @@ function Op(o, optType) { "use strict";
 				// check if compare sig of same type and different size or sign
 				if (type(obj.left).id === "sig" && type(obj.right).id === "sig") {
 					if (type(obj.left).size !== type(obj.right).size) {
-						throw formatErr("Illegal comparison of different size variables!");
+						throw modelErr("cmpsz", "", stat.getPos());
+						// Illegal comparison of different size variables!
 					}
 					if (type(obj.left).unsigned !== type(obj.right).unsigned) {
-						throw formatErr("Illegal comparison of signed and unsigned value!");
+						throw modelErr("cmpm", "", stat.getPos());
+						// Illegal comparison of signed and unsigned value!
 					}
 				} else if (type(obj.right).id === "num") { // compare to number
 					if (type(obj.left).size===1) {
 						let n = Number(vec.out(obj.right.val()));
 						if (n!==0 && n!==1) {
-							throw formatErr("Compare bit to '0' or '1'!");
+							throw modelErr("cmpb", "", stat.getPos());
 						}
 					}
 				} else if (type(obj.left).id === "num") {
 					if (type(obj.right).size===1) {
 						let n = Number(vec.out(obj.left.val()));
 						if (n!==0 && n!==1) {
-							throw formatErr("Compare bit to '0' or '1'!");
+							throw modelErr("cmpb", "", stat.getPos());
 						}
 					}					
 				}
@@ -408,6 +412,7 @@ function Op(o, optType) { "use strict";
 			case "~": op = "not"; break;
 			case "+": 			
 			case "-": op = op; break;
+			case "*": op = op; break;
 			case "&": 
 			case "&&": op = "and"; break;
 			case "|":
@@ -418,7 +423,7 @@ function Op(o, optType) { "use strict";
 			case "<": op = "<"; break;
 			case "<=": op = "<="; break;
 			case ">": op = ">"; break;
-			case ">=": op = ">="; break;
+			case ">=": op = ">="; break;			
 			default: console.log("on.emitVHD: unknown operation!");
 		}		
 				
@@ -441,7 +446,10 @@ function Op(o, optType) { "use strict";
 				
 				str = "(";
 				if (lt.id==="num") {
-					if (rt.id==="num") {return vec.out(val());} // return calculated value !
+					if (rt.id==="num") {
+console.log("CALC!");	// ERR: x = 2-3					
+						return vec.out(val());
+						} // return calculated value !
 					if (rt.id==="bit") { // TODO num cast: 0, 1
 						exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 						str += resizeVar(exp, obj.type.size, 1);
@@ -530,6 +538,8 @@ function Op(o, optType) { "use strict";
 						if ((op==="+" || op==="-") && (obj.type.size > Math.max(lt.size, rt.size))) {
 							str += resizeVar(obj.left.emitVHD(), obj.type.size, lt.size)+" "+op+"  "+
 								   resizeVar(obj.right.emitVHD(), obj.type.size, rt.size);
+						} else if (op==="*") {
+							str += resizeVar(obj.left.emitVHD()+op+obj.right.emitVHD(), obj.type.size, lt.size+rt.size);
 						} else {
 							if (lt.size === rt.size) {  // resize operand ?
 								exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
@@ -633,7 +643,7 @@ function Statement(t) {  "use strict";
 	function visit(pass, vars) {  // Statement.visit		
 		let str = obj.id+": ";
 		let assignments = 0;
-console.log("Statement.visit: "+pass);
+		if (log) {console.log("Statement.visit: "+pass);}
 		
 		if (obj.id==="=" || obj.id==="<=") {
 			if (pass===1) { // first pass, indentify number & type of assignments, count operands			
@@ -641,12 +651,12 @@ console.log("Statement.visit: "+pass);
 				
 				let assignop = hdl(obj.target).assignop;			
 				if ((assignop==="=" && obj.id==="<=") || (assignop==="<=" && obj.id==="=")) {
-					throw formatErr("Mixed comb and sequential assignments!");
+					throw modelErr("mix", "", stat.getPos()); //Mixed comb and sequential assignments!
 				}
 		
 				assignments = hdl(obj.target).assignments;
 				if (assignments===undefined) {assignments=0;}
-console.log("SET A VAR");				
+
 				obj.target.set({hdl: {assignments:assignments+1, assignop:obj.id}}); 
 				
 				str += obj.target.visit()+"= "; // visit target, set mode=out
@@ -654,9 +664,9 @@ console.log("SET A VAR");
 				
 				if (obj.expr === null) {str+="?";} 
 				else {				
-					item = [];
+					stat.initItem();
 					str += obj.expr.visit();  // visit expression, count operands, set var mode = in				
-					for (const id of item) {
+					for (const id of stat.getItem()) {
 						setHdlMode(vars.get(id), "in");
 					}
 				}
@@ -702,9 +712,9 @@ console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(o
 			
 		} else if (obj.id==="if") {
 			if (pass===1) {
-				item = [];
+				stat.initItem();
 				str += obj.expr.visit()+"\n";
-				for (const id of item) {
+				for (const id of stat.getItem()) {
 					setHdlMode(vars.get(id), "in");
 				}
 				
@@ -870,6 +880,7 @@ function Blok(namestring) {
 //console.log("Block.visit "+pass+" "+obj.name);	 
     let str = "Blok("+obj.level+"): \n";
 	statements.forEach(function (st) {
+		stat.setPos(st.get().pos); // save current visit statement position
 		if (pass===1) {
 			if (st.get().id==="=") {obj.combCnt += 1;}
 			if (st.get().id==="<=") {obj.seqCnt += 1;}
@@ -879,7 +890,8 @@ function Blok(namestring) {
 			let id = st.get().target.get().name; 
 //console.log("Blok: = "+id);
 			if (targets.includes(id)) {	
-				throw formatErr("Multiple assignments to "+id+" in the same block!", st.get().pos);				
+			//Multiple assignments to "+id+" in the same block!
+				throw modelErr("mult", id, st.get().pos); // Multiple assignments to "+id+" in the same block!", st.get().pos);				
 			} else {
 			  targets.push(id);
 			}

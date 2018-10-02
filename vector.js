@@ -15,15 +15,14 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
   
   function hex(h) {return h[1].toString(16)+"_"+h[0].toString(16);}
 
-  function parse(str) {
+  function parse(str) { // string to vector
 	let n = parseInt(str);
-	//if (veclog) {console.log("Parse: "+n);}
 	
 	if (n <= maxN) {return [n, 0];}
 	return [n % (maxN+1), n / (maxN+1)];
   }
   
-  function out(o, unsigned) {
+  function out(o, unsigned) { // vector to string, TODO > 32 bit
 	if (unsigned) {
 		if (o[1]===0) {return o[0].toString();}
 		return (o[1]*4294967296 + o[0]).toString();
@@ -81,6 +80,37 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	 return obj;
   }
   
+  function mul(a, b) { // unsigned multiply, limit: 32 bit inputs!
+	let r = zero;
+	let tmp = 0;
+	
+	if (a[1]===0 && b[1]===0) {
+		if (a[0]<=65535 || b[0]<=65535) { // one operand < 16 bit, OK		
+			tmp = a[0]*b[0];			
+			if (tmp > maxN) {
+				r[1] = Math.floor(tmp / (2**32)); 
+				r[0] = tmp % (2**32); 
+			} else {
+				r[0] = tmp;
+			}
+		} else { // TODO: divide b into 16 bit chunks
+			tmp = a[0]*b[0];			
+			if (tmp > maxN) {
+				r[1] = Math.floor(tmp / (2**32)); 
+				r[0] = tmp % (2**32); 
+			} else {
+				r[0] = tmp;
+			}		
+			if (veclog) {console.log("32 bit multiplication with loss of data...");}
+		}
+		
+	} else {
+	 if (veclog) {console.log("mul input > 32 bit");}		
+	}
+	
+	return r;
+  }
+  
   function and(a, b) {return a.map((a,i) => a & b[i]);}
   function or(a, b) {return a.map((a,i) => a | b[i]);}
   function xor(a, b) {return a.map((a,i) => a ^ b[i]);}
@@ -89,20 +119,21 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
   function unary(operation, x) {
 	if (operation==="-") {return sub(zero, x);}
 	if (operation==="~") {return not(x);}
-	console.log("ERR in Vector: unknown unary op!");
+	if (veclog) {console.log("ERR in Vector: unknown unary op!");}
   }
   
   function op(operation, left, right) {
 	switch (operation) {
 		case "+": return add(left, right);
 		case "-": return sub(left, right);
+		case "*": return mul(left, right);
 		case "&": 
 		case "&&":return and(left, right);
 		case "|": 
 		case "||":return or(left, right);
 		case "^": return xor(left, right);
 		default: {
-			console.log("ERR in Vector op!");
+			if (veclog) {console.log("ERR in Vector op!");}
 			return zero;
 		}
 	} 
