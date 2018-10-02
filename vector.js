@@ -13,24 +13,43 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	  return v[1]===0 && v[0]===0;
   }
   
-  function hex(h) {return h[1].toString(16)+"_"+h[0].toString(16);}
+  function hex(h) {
+	if (h[1]===0) {
+		return "0X"+(h[0] >>> 0).toString(16);
+	} else {
+		const low = (h[0] >>> 0).toString(16);
+        return "0X"+(h[1] >>> 0).toString(16)+"_"+("0".repeat(8 - low.length)) + low;
+	}
+  }
 
   function parse(str) { // string to vector
 	let n = parseInt(str);
 	
 	if (n <= maxN) {return [n, 0];}
-	return [n % (maxN+1), n / (maxN+1)];
+	return [n % (maxN+1),  Math.floor(n / (maxN+1))];
   }
   
-  function out(o, unsigned) { // vector to string, TODO > 32 bit
+  // string (number) representation of vector
+  //  if < 32 bit, return decimal number, else return hex due to JS loss of precision
+  function out(o, unsigned) {
 	if (unsigned) {
 		if (o[1]===0) {return o[0].toString();}
-		return (o[1]*4294967296 + o[0]).toString();
+		return hex(o);
+		//(o[1]*4294967296 + o[0]).toString(); loss of precision for > 53 bit
 	} else {
 		if (o[1]===0) {return o[0].toString();}
-		if (o[1]===0xFFFFFFFF) {return o[0].toString();}
-		return "???";
+		if (o[1]===0xFFFFFFFF) { // neg, <= 32 bit
+		    const n = o[0] >> 0; // to signed integer
+			return n.toString();
+		}		
+		return hex(o);
+		//n = complement(o);
+		//return "-"+(n[1]*4294967296 + n[0]).toString();
 	}
+  }
+  
+  function complement(a) {
+	  return op("+",[~a[0], ~a[1]], one);
   }
   
   function mask(n) {

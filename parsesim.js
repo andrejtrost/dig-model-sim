@@ -556,8 +556,8 @@ function runCycle(tree, i) {
 	
 	tree.ports.forEach(function (p, id) {
 		if (tree.vars.has(id)) {
-			if (p.mode==="out") {
-			  console.log("Port out: "+id);
+			if (p.mode==="out" || p.mode==="") {
+			  //console.log("Port out: "+id);
 			  v= tree.vars.get(id);			  
 			  setSignal(i, id, vec.out(v.val(), type(v).unsigned));
 			}

@@ -54,6 +54,7 @@ function errTxt(str, id) {  // compose error log text, use global english
 		case "inf": s = (english) ? "Simulation infinite loop!" : "Simulacija v neskončni zanki!"; break;
 		// input errors
 		case "mode": s = (english) ? "Unknown Mode for port '"+id+"'!" : "Neznan Mode priključka '"+id+"'!"; break;
+		case "size": s = (english) ? "Illegal size of signal '"+id+"' (1-64)!" : "Napačna velikost signala '"+id+"' (1-64)!"; break;
 		// visit model errors
 		case "vin": s = (english) ? "Signal '"+id+"' should be input!" : "Signal '"+id+"' mora biti vhod!"; break;
 		case "cmpsz": s = (english) ? "Compare size mismatch!" : "Neujemanje velikosti primerjave!"; break; 
@@ -108,8 +109,8 @@ function getPorts() {  // get Ports data from html form
 				let s = (document.getElementById("type"+(i+1)).value);
 				let u = (s.slice(0,1)==="u"); 
 				size = parseInt(s.slice(1));			
-				if (!typepatt.test(s) || !(size>0 && size<100)) {
-					console.log("Input: "+id+" type error!");				
+				if (!typepatt.test(s) || !(size>0 && size<65)) {
+					throw modelErr("size", id);					
 					size = 1;
 				}						
 				signals.set(id, {type:{unsigned: u, size:size}, mode:m});
