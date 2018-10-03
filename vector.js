@@ -35,7 +35,6 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	if (unsigned) {
 		if (o[1]===0) {return o[0].toString();}
 		return hex(o);
-		//(o[1]*4294967296 + o[0]).toString(); loss of precision for > 53 bit
 	} else {
 		if (o[1]===0) {return o[0].toString();}
 		if (o[1]===0xFFFFFFFF) { // neg, <= 32 bit
@@ -43,91 +42,109 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 			return n.toString();
 		}		
 		return hex(o);
-		//n = complement(o);
-		//return "-"+(n[1]*4294967296 + n[0]).toString();
 	}
   }
   
-  function complement(a) {
-	  return op("+",[~a[0], ~a[1]], one);
+  function complement(c) {
+	const a = [~c[0], ~c[1]];
+	
+	return op("+",a, [1,0]);
   }
   
   function mask(n) {
 	let i = 1;
-	let j = 0;
+	let index = 0;
+	let m = [1, 0]; // mask seed for n<=32
 
-	if (n<=32) {
-		obj = [1, 0];
-		j = 0;
-	} else {
-		obj = [0xFFFFFFFF, 1]; 
-		j = 1;
+	if (n>32) {
+		m = [0xFFFFFFFF, 1]; 
+		index = 1;
 		n -= 32;
 	}
 
-	while (i<n) {
-		obj[j] += (1 << i);
+	while (i < n) {
+		m[index] += (1 << i);
 		i += 1;
 	} 
 	
-	//if (veclog) {console.log("Mask: "+n+"="+vec.hex(obj));}
-	return obj;
+	return m;
   }
 	
   function add(a,b) { // compute sum, convert to int32
-	obj[0] = a[0] + b[0];
-	if (obj[0] > maxN) {
-		obj[1] = (a[1] + b[1] + 1) >>> 0;
-		obj[0] >>>= 0;  // to Uint32
+	let r = [0, 0];
+
+	r[0] = a[0] + b[0];
+	if (r[0] > maxN) {
+		r[1] = (a[1] + b[1] + 1) >>> 0;
+		r[0] >>>= 0;  // to Uint32
 	} else {
-		obj[1] = (a[1] + b[1]) >>> 0;
+		r[1] = (a[1] + b[1]) >>> 0;
 	}		
-	if (veclog) {console.log("add res="+vec.hex(obj));}
-    return obj;
+	if (veclog) {console.log("add res="+vec.hex(r));}
+    return r;  
   }
   
   function sub(a,b) {
-	 obj[0] = a[0] - b[0];
+	 let r = [0, 0];
+	 r[0] = a[0] - b[0];
 	 
-	 if (obj[0]<0) {
-		obj[1] = (a[1] - b[1] - 1) >>> 0;		
-		obj[0] >>>= 0;  //obj[0] += (maxN+1);  
+	 if (r[0]<0) {
+		r[1] = (a[1] - b[1] - 1) >>> 0;		
+		r[0] >>>= 0;  //obj[0] += (maxN+1);  
 	 } else {
-		 obj[1] = (a[1] - b[1]) >>> 0;
+		 r[1] = (a[1] - b[1]) >>> 0;
 	 }
-	 if (veclog) {console.log("sub res="+vec.hex(obj));}
-	 return obj;
+	 if (veclog) {console.log("sub res="+vec.hex(r));}
+	 return r;
   }
   
-  function mul(a, b) { // unsigned multiply, limit: 32 bit inputs!
-	let r = zero;
+  function mul(m1, m2) { // unsigned multiply, limit: 32 bit inputs!
+	let result = [0,0];
 	let tmp = 0;
-	
-	if (a[1]===0 && b[1]===0) {
-		if (a[0]<=65535 || b[0]<=65535) { // one operand < 16 bit, OK		
-			tmp = a[0]*b[0];			
+
+	let mult1 = {...m1};
+	let mult2 = {...m2};
+	let unsigned = true;
+//console.log("Mult low: "+mult1[0]+" * "+mult2[0]);
+
+	if (m1[1] & 0x80000000 !== 0) {	// complement negative value
+		mult1 = add([~m1[0], ~m1[1]], [1,0]);    //op("+",[~m1[0], ~m1[1]], [1,0]);
+		unsigned = !unsigned;
+	}	
+
+	if (m2[1] & 0x80000000 !== 0) {
+		mult2 = add([~m2[0], ~m2[1]], [1,0]); //op("+",[~m2[0], ~m2[1]], [1,0]); // = complement(m2);
+		unsigned = !unsigned;
+	}
+//console.log("Mult low: "+mult1[0]+" * "+mult2[0]);	
+
+	if (mult1[1]===0 && mult2[1]===0) {
+		if (mult1[0]<=65535 || mult2[0]<=65535) { // one operand < 16 bit, OK			
+			tmp = mult1[0]*mult2[0];			
 			if (tmp > maxN) {
-				r[1] = Math.floor(tmp / (2**32)); 
-				r[0] = tmp % (2**32); 
+				result[1] = Math.floor(tmp / (2**32)); 
+				result[0] = tmp % (2**32); 
 			} else {
-				r[0] = tmp;
+				result[0] = tmp;
 			}
-		} else { // TODO: divide b into 16 bit chunks
-			tmp = a[0]*b[0];			
-			if (tmp > maxN) {
-				r[1] = Math.floor(tmp / (2**32)); 
-				r[0] = tmp % (2**32); 
-			} else {
-				r[0] = tmp;
-			}		
-			if (veclog) {console.log("32 bit multiplication with loss of data...");}
+		} else { // divide b into 16 bit chunks, compute partial product b1, b2
+			let b1 = mult1[0] * (mult2[0] & 0xFFFF);
+			let b2 = mult1[0] * (mult2[0] >> 16); // 48-bit
+
+			let t1 = [(b1 & 0xFFFFFFFF)>>>0, Math.floor(b1 / 2**32)];
+			let t2 = [((b2 & 0xFFFF)<<16)>>>0, Math.floor(b2 / 2**16)];
+			result = add(t1, t2); //  op("+",t1,t2);
 		}
 		
 	} else {
 	 if (veclog) {console.log("mul input > 32 bit");}		
 	}
 	
-	return r;
+	if (!unsigned) { // add multiply sign
+		result = complement(result);
+	}
+	
+	return result;
   }
   
   function and(a, b) {return a.map((a,i) => a & b[i]);}
@@ -141,7 +158,9 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	if (veclog) {console.log("ERR in Vector: unknown unary op!");}
   }
   
-  function op(operation, left, right) {
+  function op(operation, leftOp, rightOp) {
+	const left = {...leftOp};   //[l[0], l[1]];  
+	const right = {...rightOp}; //[r[0], r[1]];  
 	switch (operation) {
 		case "+": return add(left, right);
 		case "-": return sub(left, right);
@@ -162,7 +181,7 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	  let eq = false;
 	  let gt = false;
 	  let ls = false;
-	  let res = zero;
+	  let res = [0,0];
 	  
 	  if (left[1] === right[1]) {
 		if (left[0] === right[0]) {eq = true;}
@@ -174,18 +193,18 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	  }
 	  
 	  switch (op) {
-		case "==": res = eq ? one:zero; break;
-		case "!=": res = !eq ? one:zero; break;
-		case ">": res = gt ? one:zero; break;
-		case ">=": res = gt|eq ? one:zero; break;
-		case "<": res = ls ? one:zero; break;
-		case "<=": res = ls|eq ? one:zero; break;
-		default: res = zero;
+		case "==": res = eq ? [1,0]:[0,0]; break;
+		case "!=": res = !eq ? [1,0]:[0,0]; break;
+		case ">": res = gt ? [1,0]:[0,0]; break;
+		case ">=": res = gt|eq ? [1,0]:[0,0]; break;
+		case "<": res = ls ? [1,0]:[0,0]; break;
+		case "<=": res = ls|eq ? [1,0]:[0,0]; break;
+		default: res = [0,0];
 	  }
 
 	  if (veclog) {console.log("Vector cmp "+left+" "+op+" "+right+": "+res);}
 	  return res;
   }
   
-  return {zero, isZero, parse, out, hex, mask, op, unary, cmp};
+  return {zero, isZero, parse, out, hex, mask, op, unary, cmp, complement};
 }

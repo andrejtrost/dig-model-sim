@@ -50,15 +50,18 @@ function errTxt(str, id) {  // compose error log text, use global english
 		case "expvn": s = (english) ? "Expected signal or number!" : "Pričakujem signal ali število!"; break;
 		case "tin": s = (english) ? "Assignment to input signal '"+id+"'!" : "Prireditev vhodnemu signalu '"+id+"'!"; break;
 		case "unexp": s = (english) ? "Unexpected token '"+id+"'!" : "Nepričakovan simbol '"+id+"'!"; break;
+		case "mixs": s = (english) ? "Illegal usage of Signed and Unsigned in expression!" : 
+		                             "Neveljavna uporaba Signed in Unsigned v izrazu!"; break;
 		// simulator errors
 		case "inf": s = (english) ? "Simulation infinite loop!" : "Simulacija v neskončni zanki!"; break;
 		// input errors
 		case "mode": s = (english) ? "Unknown Mode for port '"+id+"'!" : "Neznan Mode priključka '"+id+"'!"; break;
+		case "type": s = (english) ? "Illegal Type of signal '"+id+"'!" : "Napačna oznaka tipa signala '"+id+"'!"; break;
 		case "size": s = (english) ? "Illegal size of signal '"+id+"' (1-64)!" : "Napačna velikost signala '"+id+"' (1-64)!"; break;
 		// visit model errors
 		case "vin": s = (english) ? "Signal '"+id+"' should be input!" : "Signal '"+id+"' mora biti vhod!"; break;
 		case "cmpsz": s = (english) ? "Compare size mismatch!" : "Neujemanje velikosti primerjave!"; break; 
-		case "cmpm": s = (english) ?  "Illegal Signed/Unsigned comparisson!" : "Neveljavna primerjava Signed/Unsigned!"; break;
+		case "cmpm": s = (english) ?  "Illegal Signed/Unsigned comparisson!" : "Neveljavna primerjava različno predznačenih vrednosti!"; break;
 		case "cmpb": s = (english) ?  "Illegal one-bit comparisson!" : "Neveljavna enobitna primerjava!"; break;
 		case "mix": s = (english) ?  "Mixed comb and sequential assignments!" : 
 		                             "Mešanje kombinacijsih in sekvenčnih prireditev!"; break;
@@ -107,10 +110,14 @@ function getPorts() {  // get Ports data from html form
 					m ="";
 				}			
 				let s = (document.getElementById("type"+(i+1)).value);
+				if (!typepatt.test(s)) {
+					throw modelErr("type", id);
+				}
 				let u = (s.slice(0,1)==="u"); 
-				size = parseInt(s.slice(1));			
-				if (!typepatt.test(s) || !(size>0 && size<65)) {
-					throw modelErr("size", id);					
+				size = parseInt(s.slice(1));
+				
+				if ((u && !(size>0 && size<65)) || (!u && !(size>1 && size<65))) {
+					throw modelErr("size", id);
 					size = 1;
 				}						
 				signals.set(id, {type:{unsigned: u, size:size}, mode:m});

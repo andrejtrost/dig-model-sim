@@ -111,27 +111,41 @@ function Stat() {    // statistics and tmp values
 stat = new Stat(); // global status object, resource statistics and global tmp values
 
 function NumConst(n, fmt) { "use strict";
-	let num = Number(n);
-	const format = fmt;
-	let value = [num, 0];
+	let num = 0;
+	let value = [0, 0];
 	let obj = {unsigned:true, size:0};
+	const format = fmt;	
 	
-	if (n<0) {
-		obj.size = Number(-num).toString(2).length+1;
+	if (n[0]==="-") {
+		num = Number(n.slice(1));
+		const tmp = vec.op("-", vec.zero, [num, 0]);
+		value = [tmp[0], tmp[1]];
+		obj.size = num.toString(2).length+1;
 		obj.unsigned = false;
+//console.log("NUM value: "+value);		
 		if (logval) {console.log("NumConst negative!");}
 	} else {
+		num = Number(n);
+		value = [num, 0];
 		obj.size = num.toString(2).length;
 		if (logval) {console.log("NumConst "+obj.size);}
 	}
 
-	function val() {return value;}	
+	function val() {return value;}
+		
 	function get() {
 		return {type: {id:"num", unsigned:obj.unsigned, size:obj.size}, format:format};
 	}
 	
     function visit() {return value[0].toString();}
-	function emitVHD() {return value[0].toString();}
+	function emitVHD() {	
+		// check for negative value (signed numeric constant)	
+		if (obj.unsigned===false) {
+			let c = vec.complement(value);
+			return "-"+c[0].toString();
+		}
+		return value[0].toString();
+	}
 	function count() {return 1;}
 	 
 	return {val, get, visit, emitVHD, count};
@@ -300,17 +314,16 @@ function Op(o, optType) { "use strict";
 		if (isComparisonOp(obj.op)) { // test comparison
 			if (obj.left===null || obj.right===null) {
 				console.log("op.visit: Unexpected empty comparison!");
-			} else {
+			} else {				
 				// check if compare sig of same type and different size or sign
 				if (type(obj.left).id === "sig" && type(obj.right).id === "sig") {
 					if (type(obj.left).size !== type(obj.right).size) {
 						throw modelErr("cmpsz", "", stat.getPos());
 						// Illegal comparison of different size variables!
 					}
-					if (type(obj.left).unsigned !== type(obj.right).unsigned) {
+					if (type(obj.left).unsigned !== type(obj.right).unsigned) { // Illegal signed/unsigned
 						throw modelErr("cmpm", "", stat.getPos());
-						// Illegal comparison of signed and unsigned value!
-					}
+					}	
 				} else if (type(obj.right).id === "num") { // compare to number
 					if (type(obj.left).size===1) {
 						let n = Number(vec.out(obj.right.val()));
@@ -318,12 +331,19 @@ function Op(o, optType) { "use strict";
 							throw modelErr("cmpb", "", stat.getPos());
 						}
 					}
+					if (type(obj.left).unsigned && !type(obj.right).unsigned) { // illegal unsigned to signed num
+						throw modelErr("cmpm", "", stat.getPos());
+					}
+					
 				} else if (type(obj.left).id === "num") {
 					if (type(obj.right).size===1) {
 						let n = Number(vec.out(obj.left.val()));
 						if (n!==0 && n!==1) {
 							throw modelErr("cmpb", "", stat.getPos());
 						}
+					}
+					if (!type(obj.left).unsigned && type(obj.right).unsigned) { // illegal signed num to unsigned
+						throw modelErr("cmpm", "", stat.getPos());
 					}					
 				}
 			}
@@ -389,14 +409,14 @@ function Op(o, optType) { "use strict";
 	let op = "";
 	let lt = null;
 	let rt = null;
-	
+
 	if (obj.op==="") {  // single operand, check operand & op data type
 		str="";
 		if (obj.left!==null) {
 			console.log("A1 "+type(obj.left).size+" "+obj.type.size);
 			if (type(obj.left).size !== obj.type.size) { // left size <> op size, set by Statement.visit (NOTE)
 // check if numeric variable
-				if (type(obj.left).id==="num") {
+				if (type(obj.left).id==="num") {					
 					str += obj.left.emitVHD();
 			    } else {				
 					str += resizeVar(obj.left.emitVHD(), obj.type.size, type(obj.left).size);	
@@ -672,15 +692,20 @@ function Statement(t) {  "use strict";
 				}
 				
 				if (type(obj.target).size !== type(obj.expr).size) {  // NOTE: Resize assignment, correct expr op
-console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(obj.expr).size);
+					if (log) {console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(obj.expr).size);}
 					obj.expr.set({type: {size: type(obj.target).size}});
 				}
 				
 			} else {  // second pass
 				if (obj.expr.count()===1) {  // single assignment to num => constant
 					if ((type(obj.expr).id==="num") && (hdl(obj.target).assignments===1)
-						&& mode(obj.target)!=="out") {
-						obj.target.set({hdl: {mode:"const", val:vec.out(obj.expr.val())}});
+						&& mode(obj.target)!=="out") {						
+						if (type(obj.target).unsigned && !type(obj.expr).unsigned) { // signed num to unsigned const
+							const mask = vec.mask(type(obj.target).size);
+							obj.target.set({hdl: {mode:"const", val:(obj.expr.val()[0] & mask[0])}});
+						} else {
+							obj.target.set({hdl: {mode:"const", val:vec.out(obj.expr.val())}});
+						}
 						obj.translated = true;// exclude from translation to VHDL statements
 					}
 				}
@@ -740,7 +765,7 @@ console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(o
 		let num = 0;
 		if ((obj.id==="=" && isComb) || (obj.id==="<=" && !isComb)) {	// assignment						
 			if (obj.expr === null) {return "?";} // unexpected empty expression
-			
+						
 			expStr = obj.expr.emitVHD();
 			let lsz = type(obj.target).size;
 			let rsz = type(obj.expr).size;
@@ -762,8 +787,13 @@ console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(o
 							if (num%2===0) {str += "'0'";}
 							else {str += "'1'";}								
 						} else {
-							if (type(obj.target).unsigned) {
-								str += "to_unsigned("+expStr+","+lsz+")";
+							if (type(obj.target).unsigned) {			
+								if (!type(v).unsigned) { // signed int to unsigned, special case
+									const mask = vec.mask(lsz);							
+									str += "to_unsigned("+(v.val()[0] & mask[0])+","+lsz+")";
+								} else {									
+									str += "to_unsigned("+expStr+","+lsz+")";
+								}
 							} else {
 								str += "to_signed("+expStr+","+lsz+")";
 							}
@@ -805,8 +835,7 @@ console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(o
 								str += "to_signed("+expStr+","+lsz+")";
 							}
 						}
-				} else {
-console.log("EXPASIGN "+lsz+" "+rsz);					
+				} else {					
 					if (lsz!==rsz) {
 						expStr = "resize("+expStr+","+lsz+")";
 					}
@@ -828,7 +857,6 @@ console.log("EXPASIGN "+lsz+" "+rsz);
 			
 			//str += "\n";
 		} else if (obj.id==="if") {  // if statement, check if belongs to comb 
-console.log("EMIT: IF"+obj.combProc+": "+isComb);			
 			if ((obj.combProc && isComb) || (obj.seqProc && !isComb)) {
 			
 				str = spaces+"if "+obj.expr.emitVHD()+" then\n";
@@ -839,7 +867,6 @@ console.log("EMIT: IF"+obj.combProc+": "+isComb);
 				if (obj.elseBlock!==null) {
 					str += spaces+"else\n";
 					obj.elseBlock.statements.forEach(function(st) {
-console.log("EMIT: ELSE"+isComb);						
 						str += st.emitVHD(indent,  isComb);
 					});			
 				}
@@ -897,7 +924,7 @@ function Blok(namestring) {
 			}
 		}
 	});
-console.log("Block: comb="+obj.combCnt+" seq="+obj.seqCnt);
+	if (log) {console.log("Block: comb="+obj.combCnt+" seq="+obj.seqCnt);}
 	return str;	
  }
 	

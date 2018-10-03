@@ -91,15 +91,17 @@ function Circuit() {
 		v.setVal(vec.parse(val));
 	});	 
 	
-	change = valDelta(true); // first delta, sequential
-	
-	s = getInValues(i);  // read input (i)
-	if (s===undefined) {return;}
-	
-	s.forEach(function (val, id) {		
-		v = getVar(id);
-		v.setVal(vec.parse(val));
-	});	
+	if (i>0) { // first delta is sequential except cycle 0
+		change = valDelta(true);
+		
+		s = getInValues(i);  // read input (i)
+		if (s===undefined) {return;}
+		
+		s.forEach(function (val, id) {		
+			v = getVar(id);
+			v.setVal(vec.parse(val));
+		});	
+	}
 	
 	change = valDelta(false); // second delta, combinational
 	
@@ -163,10 +165,16 @@ function Parse(k) {
 				n.set({type: type(v)});				
 				return n;
 			}
-			if (peek().isNum()) {
-				v = new NumConst("-"+consume().id);
-				n.op(t.id);
-				n.right(v);
+			if (peek().isNum()) { // compute actual value
+			    //let n = Number(consume().id);
+				//let r = vec.op("-", vec.zero, [n, 0]);
+//console.log("Result: "+r);				
+				
+				v = new NumConst(t.id+consume().id);
+				//n.op(t.id);
+				//n.right(v);
+				//n.set({type: type(v)});
+				n.left(v); 			
 				n.set({type: type(v)});
 				return n;				
 			}
@@ -226,10 +234,14 @@ function Parse(k) {
 					sz = sz1 + sz2;
 				}
 			}
+			const u1 = type(f).unsigned;
+			const u2 = type(f2).unsigned;
+			if ((u1 && !u2) || (!u1 && u2)) {
+				throw parseErr("mixs");
+			}			
 			
-			let u = type(f).unsigned && type(f).unsigned;
-			f.set({type: {unsigned: u, size: sz}});					
-			console.log("Term type: "+u+" "+sz);			
+			f.set({type: {unsigned: u1 && u2, size: sz}});					
+			console.log("Term type: "+(u1 && u2)+" "+sz);			
 		}
 		
 		return f; //y
@@ -257,10 +269,14 @@ function Parse(k) {
 			
 			let sz = Math.max(type(x).size, type(x2).size);			
 			console.log("Sum  "+sz);
-			if (o==="+" || o==="-") {sz += 1;}			
-			let u = type(x).unsigned && type(x2).unsigned;
-			x.set({type: {unsigned: u, size: sz}});					
-			//console.log("Sum type: "+u+" "+sz);		
+			if (o==="+" || o==="-") {sz += 1;}	
+			const u1 = type(x).unsigned;
+			const u2 = type(x2).unsigned;
+			if ((u1 && !u2) || (!u1 && u2)) {
+				throw parseErr("mixs");
+			}
+			x.set({type: {unsigned: u1 && u2, size: sz}});					
+			//console.log("Sum type: "+(u1&&u2)+" "+sz);		
 		}
 		
 		let logstr = x.visit(true);   // visit operator for statistics

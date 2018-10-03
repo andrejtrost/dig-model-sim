@@ -82,6 +82,14 @@ function VHDLports() {
 				}
 			}
 			s += conv+";\n";
+		} else if (hdl(val).assignop==="<=") {  // initial value for sequential signals
+			s += " := ";
+			if (type(val).unsigned) {
+				s += "to_unsigned(0, "+type(val).size+")";
+			} else {
+				s += "to_signed(0, "+type(val).size+")";
+			}			
+			s += ";\n";
 		} else {		
 			s += ";\n";
 		}
