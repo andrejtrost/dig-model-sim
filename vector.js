@@ -70,6 +70,26 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	return m;
   }
 	
+  function shiftLeft(a, n) {
+	let r = [0, 0];
+	const bits = (n<32) ? n : n-32;
+	const m = mask(32-bits);
+	
+	if (n < 32) {	
+		r[0] = ((a[0] & m[0]) << bits) >>>0;
+		const rem = (a[0] & ~m[0])>>>(32-bits);	
+		r[1] = (((a[1] & m[0]) << bits) | rem) >>>0;
+	} else {		
+		r[1] = ((a[0] & m[0]) << bits) >>>0;
+	}
+	return r;
+  }
+	
+  function concat(a,b, sizeB) { // concat
+    const left = {...a};
+	return or(shiftLeft(left, sizeB), b);
+  }
+	
   function add(a,b) { // compute sum, convert to int32
 	let r = [0, 0];
 
@@ -147,10 +167,25 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	return result;
   }
   
-  function and(a, b) {return a.map((a,i) => a & b[i]);}
-  function or(a, b) {return a.map((a,i) => a | b[i]);}
-  function xor(a, b) {return a.map((a,i) => a ^ b[i]);}
-  function not(a) {return a.map(a => (~a));} // ? >>>0
+  function and(a, b) {
+	const o = [a[0], a[1]];
+    return o.map((o,i) => o & b[i]);
+  }
+  
+  function or(a, b) {
+	const o = [a[0], a[1]];
+	return o.map((o,i) => o | b[i]);  
+  }
+  
+  function xor(a, b) {
+	const o = [a[0], a[1]];
+	return o.map((o,i) => o ^ b[i]);  
+  }
+  
+  function not(a) {
+    const o = [a[0], a[1]];	  
+	return o.map(o => (~o));  // ? >>>0
+  } 
   
   function unary(operation, x) {
 	if (operation==="-") {return sub(zero, x);}
@@ -206,5 +241,5 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	  return res;
   }
   
-  return {zero, isZero, parse, out, hex, mask, op, unary, cmp, complement};
+  return {zero, isZero, parse, out, hex, mask, op, unary, cmp, complement, shiftLeft, concat};
 }

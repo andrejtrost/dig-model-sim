@@ -250,16 +250,18 @@ function Parse(k) {
 	
 	function expression(n) {
 		let x = term(n);
+		let o = "?";
 		if (x === undefined) {return;}
 		//console.log("term type: "+x.getType().size);
 		
-		while (peek().id==="+" || peek().id==="-" || peek().id==="|" || peek().id==="^") {
-			let o = consume().id;
+		while (peek().id==="+" || peek().id==="-" || peek().id==="|" || peek().id==="^" || peek().id===",") { // TODO ,
+			o = consume().id;
 			
 			if (x.getOp()==="") { // set empty or create new operation
 				x.op(o);
 			} else {
-				x = new Op({op:o, left:x, right:null}, type(x));				
+				const opType={...type(x)};   //copy type property
+				x = new Op({op:o, left:x, right:null}, opType); // type(x)
 			}
 			
 			// second term
@@ -269,14 +271,18 @@ function Parse(k) {
 			
 			let sz = Math.max(type(x).size, type(x2).size);			
 			console.log("Sum  "+sz);
-			if (o==="+" || o==="-") {sz += 1;}	
+			if (o==="+" || o==="-") {sz += 1;}
+			else if (o===",") {
+				sz = type(x).size + type(x2).size;
+				if (sz>64) {throw parseErr("limit");}
+			}
 			const u1 = type(x).unsigned;
 			const u2 = type(x2).unsigned;
 			if ((u1 && !u2) || (!u1 && u2)) {
 				throw parseErr("mixs");
 			}
 			x.set({type: {unsigned: u1 && u2, size: sz}});					
-			//console.log("Sum type: "+(u1&&u2)+" "+sz);		
+//console.log("Exp "+o+" type: "+(u1&&u2)+" "+sz);		
 		}
 		
 		let logstr = x.visit(true);   // visit operator for statistics

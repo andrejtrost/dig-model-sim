@@ -11,7 +11,7 @@
 
 const log = true;
 const logval = true;
-const logset = false;
+const logset = true;
 
 // util functions
 // get variable object and return mode, type
@@ -292,7 +292,10 @@ function Op(o, optType) { "use strict";
 	}
 	if (isComparisonOp(obj.op)) {
 		return vec.cmp(obj.op, obj.left.val(), obj.right.val());
-	}	
+	}
+	if (obj.op===",") {
+		return vec.concat(obj.left.val(), obj.right.val(), type(obj.right).size);
+	}
 	return vec.op(obj.op, obj.left.val(), obj.right.val());
  } 
 		
@@ -358,13 +361,12 @@ function Op(o, optType) { "use strict";
 		}
 		str += " "+obj.op+" ";
 		if (obj.right!==null) { // visit right
-
 			str += obj.right.visit(statistics); 
 			no += obj.right.count();
 			id2 = type(obj.right).id;
 			if (obj.type.id==="") { // only one id set (single operand)
 				obj.type.id = id2;			
-			} else {	
+			} else {				
 				if (obj.type.id!==id2) { // resolve different left and right id
 					if (id2==="sig") {obj.type.id = "sig";}
 					else if (id2==="bit") {
@@ -373,7 +375,9 @@ function Op(o, optType) { "use strict";
 						obj.type.id = obj.type.id;
 					} else {console.log("Op.visit unexpected type id! "+id2);}
 				}
+				if (obj.op===",") {obj.type.id = "sig";} // TODO: check NUM
 			}
+				
 		}
 		str += ")";
 		if (statistics===true) { // compute operation statistics
@@ -409,6 +413,7 @@ function Op(o, optType) { "use strict";
 	let op = "";
 	let lt = null;
 	let rt = null;
+	let num = 0;
 
 	if (obj.op==="") {  // single operand, check operand & op data type
 		str="";
@@ -443,7 +448,8 @@ function Op(o, optType) { "use strict";
 			case "<": op = "<"; break;
 			case "<=": op = "<="; break;
 			case ">": op = ">"; break;
-			case ">=": op = ">="; break;			
+			case ">=": op = ">="; break;
+			case ",": op = "&"; break;			
 			default: console.log("on.emitVHD: unknown operation!");
 		}		
 				
@@ -454,7 +460,8 @@ function Op(o, optType) { "use strict";
 		
 			lt = type(obj.left);
 			rt = type(obj.right);
-			if (isComparisonOp(obj.op)) { // handle comparison
+//console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
+ 			if (isComparisonOp(obj.op)) { // handle comparison
 				if ((lt.id==="bit") && (rt.id==="num")) {
 					str = obj.left.emitVHD()+" "+op+" '"+obj.right.emitVHD()+"'";
 				} else if ((lt.id==="num") && (rt.id==="bit")) {
@@ -466,14 +473,18 @@ function Op(o, optType) { "use strict";
 				
 				str = "(";
 				if (lt.id==="num") {
-					if (rt.id==="num") {
-console.log("CALC!");	// ERR: x = 2-3					
-						return vec.out(val());
-						} // return calculated value !
-					if (rt.id==="bit") { // TODO num cast: 0, 1
-						exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
+					if (rt.id==="num") { // 1A
+						return vec.out(val());  // return calculated value, TODO: check size !						
+						} 
+					if (rt.id==="bit") { // 1B			
+						num = Number(obj.left.emitVHD());
+						if (num!==0 && num!==1) {setLog("emitVHD: Expression number expected 0 or 1!");}
+						if (num%2===0) {exp = "'0' "+op+" "+obj.right.emitVHD();}
+						else {exp = "'1' "+op+" "+obj.right.emitVHD();}
+						
 						str += resizeVar(exp, obj.type.size, 1);
-					} else if (rt.id==="sig") {
+						
+					} else if (rt.id==="sig") { // 1C
 						if (rt.unsigned) { // convert number to string
 							numStr = "to_unsigned("+obj.left.emitVHD()+","+rt.size+")";
 						} else {
@@ -488,14 +499,27 @@ console.log("CALC!");	// ERR: x = 2-3
 					} else {
 						console.log("op.emitVHD 1");
 					}
-				} else if (lt.id==="bit") {
-					if (rt.id==="num") {  // TODO num cast: 0, 1
-						exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
+				} else if (lt.id==="bit") { 
+					if (rt.id==="num") {  // 2A
+						num = Number(obj.right.emitVHD());
+						if (num!==0 && num!==1) {setLog("emitVHD: Expression number expected 0 or 1!");}
+						if (num%2===0) {exp = obj.left.emitVHD()+" "+op+" '0'";}
+						else {exp = obj.left.emitVHD()+" "+op+" '1'";}
+					
 						str += resizeVar(exp, obj.type.size, 1);
-					} else if (rt.id==="bit") {
-						exp = obj.left.emitVHD()+"  "+op+" "+obj.right.emitVHD();						
-						str += resizeVar(exp, obj.type.size, 1);
-					} else if (rt.id==="sig") { //  bit to vector						
+						
+					} else if (rt.id==="bit") { // 2B
+						exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+						if (op==="&") {
+							if (lt.size+rt.size !== obj.type.size) {
+								str += resizeVar(exp, obj.type.size, 2);
+							} else {
+								str += exp;
+							}
+						} else {						
+							str += resizeVar(exp, obj.type.size, 1);
+						}
+					} else if (rt.id==="sig") { // 2C
 						if (op==="+" || op==="-") { // special for arithmetic op
 							if (rt.unsigned) {
 								str +=  "unsigned'(\"\" & "+obj.left.emitVHD()+") "+op+" "+obj.right.emitVHD();
@@ -516,59 +540,95 @@ console.log("CALC!");	// ERR: x = 2-3
 						console.log("op.emitVHD 2");
 					}
 				} else if (lt.id==="sig") {			
-					if (rt.id==="num") {  // check if operation is possible (+,-, or, ...)											
-						if (op==="+" || op==="-") {  // sig +/- num do not require integer conversion
+					if (rt.id==="num") {  // 3A check if operation is possible (+,-, or, ...)
+						if (op==="&") {
+							if (rt.size===1) { // single bit
+								numStr = "'"+obj.right.emitVHD()+"'";
+							} else {
+								if (lt.unsigned) { // convert number to string
+									numStr = "to_unsigned("+obj.right.emitVHD()+","+rt.size+")";
+								} else {
+									numStr = "to_signed("+obj.right.emitVHD()+","+rt.size+")";							
+								}	
+							}
+							exp = obj.left.emitVHD()+" "+op+" "+numStr;
+							if (lt.size+rt.size !== obj.type.size) {
+								str += resizeVar(exp, obj.type.size, 2);
+							} else {
+								str += exp;
+							}
+						} else if (op==="+" || op==="-") {  // sig +/- num do not require integer conversion
 							numStr = obj.right.emitVHD();
 							if (obj.type.size === lt.size) {
 								str += obj.left.emitVHD()+" "+op+"  "+numStr;
 							} else {  // resize only sig	
 								str += "resize("+obj.left.emitVHD()+","+(obj.type.size)+") "+op+"  "+numStr;
 							}					
-						} else {							
+						} else {						
 							if (lt.unsigned) { // convert number to string
 								numStr = "to_unsigned("+obj.right.emitVHD()+","+lt.size+")";
 							} else {
 								numStr = "to_signed("+obj.right.emitVHD()+","+lt.size+")";							
-							}							
-							if (obj.type.size === lt.size) {
-								str += obj.left.emitVHD()+" "+op+" "+numStr;
-							} else {  // resize expression
-								exp = obj.left.emitVHD()+" "+op+" "+numStr;
-								str += resizeVar(exp, obj.type.size, 2);
+							}	
+							exp = obj.left.emitVHD()+" "+op+" "+numStr;
+							// check for size difference
+							
+							if (obj.type.size !== lt.size) { 
+								str += resizeVar(exp, obj.type.size, 2);	
+							} else {
+								str += exp;
 							}
 						}						
-					} else if (rt.id==="bit") {						
-						if (op==="+" || op==="-") { // special for arithmetic op
-							if (lt.unsigned) {
-								str += obj.left.emitVHD()+" "+op+" unsigned'(\"\" & "+obj.right.emitVHD()+")";
+					} else if (rt.id==="bit") { // 3B
+						if (op==="&") {
+							exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+							if (lt.size+rt.size !== obj.type.size) {
+								str += resizeVar(exp, obj.type.size, 2);
 							} else {
-								str += obj.left.emitVHD()+" "+op+" signed'(\"\" & "+obj.right.emitVHD()+")";
+								str += exp;
 							}
-						} else { // use aggregate for signed & unsigned
-							exp = obj.left.emitVHD()+" "+op+" (0=>"+obj.right.emitVHD()+", ("+(Number(lt.size)-1)+" downto 1)=>'0')";
+						} else {												
+							if (op==="+" || op==="-") { // special for arithmetic op
+								if (lt.unsigned) {
+									str += obj.left.emitVHD()+" "+op+" unsigned'(\"\" & "+obj.right.emitVHD()+")";
+								} else {
+									str += obj.left.emitVHD()+" "+op+" signed'(\"\" & "+obj.right.emitVHD()+")";
+								}
+							} else { // use aggregate for signed & unsigned
+								exp = obj.left.emitVHD()+" "+op+" (0=>"+obj.right.emitVHD()+", ("+(Number(lt.size)-1)+" downto 1)=>'0')";
+							}
+							
+							if (lt.size === obj.type.size) {
+								str += exp;
+							} else {
+								str += resizeVar(exp, obj.type.size, 2);
+							}
 						}
-						
-						if (lt.size === obj.type.size) {
-							str += exp;
-						} else {
-							str += resizeVar(exp, obj.type.size, 2);
-						}
-					} else if (rt.id==="sig") { 
+					} else if (rt.id==="sig") {  // 3C
 						// check +/- for carry (resize one )
 						if ((op==="+" || op==="-") && (obj.type.size > Math.max(lt.size, rt.size))) {
 							str += resizeVar(obj.left.emitVHD(), obj.type.size, lt.size)+" "+op+"  "+
 								   resizeVar(obj.right.emitVHD(), obj.type.size, rt.size);
 						} else if (op==="*") {
 							str += resizeVar(obj.left.emitVHD()+op+obj.right.emitVHD(), obj.type.size, lt.size+rt.size);
-						} else {
+						} else if (op==="&") {
+							exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+console.log("Exp: "+exp+"L:"+lt.size+" R:"+rt.size+" Obj:"+obj.type.size);
+							if (lt.size+rt.size !== obj.type.size) {
+								str += resizeVar(exp, obj.type.size, 2);
+							} else {
+								str += exp;
+							}
+
+						} else {							
 							if (lt.size === rt.size) {  // resize operand ?
 								exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
 							} else if (lt.size < rt.size) {
 								exp = resizeVar(obj.left.emitVHD(), rt.size, lt.size)+" "+op+"  "+obj.right.emitVHD();
 							} else {
 								exp += obj.left.emitVHD()+" "+op+" "+resizeVar(obj.right.emitVHD(), lt.size, rt.size);
-							}							
-							if (lt.size === obj.type.size) {
+							}
+							if (lt.size === obj.type.size) { 
 								str += exp;
 							} else {
 								str += resizeVar(exp, obj.type.size, 2);
@@ -769,6 +829,7 @@ function Statement(t) {  "use strict";
 			expStr = obj.expr.emitVHD();
 			let lsz = type(obj.target).size;
 			let rsz = type(obj.expr).size;
+console.log("St.emit left:"+lsz+" r:"+rsz);			
 			if (obj.expr.count()===1) { // single item assignment (num, sig or bit)
 				let v = null;
 
@@ -783,9 +844,9 @@ function Statement(t) {  "use strict";
 							num = Number(expStr);
 							if (num!==0 && num!==1) {
 								setLog("emitVHD: Assigned number expected 0 or 1!");
-							}							
+							}
 							if (num%2===0) {str += "'0'";}
-							else {str += "'1'";}								
+							else {str += "'1'";}
 						} else {
 							if (type(obj.target).unsigned) {			
 								if (!type(v).unsigned) { // signed int to unsigned, special case
@@ -798,8 +859,7 @@ function Statement(t) {  "use strict";
 								str += "to_signed("+expStr+","+lsz+")";
 							}
 						}
-				} else {
-	
+				} else {	
 					if (lsz!==rsz) {   // signal, different size
 						if (lsz===1) { // bit <- sig 
 							expStr += "(0)";

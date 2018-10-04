@@ -52,6 +52,7 @@ function errTxt(str, id) {  // compose error log text, use global english
 		case "unexp": s = (english) ? "Unexpected token '"+id+"'!" : "Nepričakovan simbol '"+id+"'!"; break;
 		case "mixs": s = (english) ? "Illegal usage of Signed and Unsigned in expression!" : 
 		                             "Neveljavna uporaba Signed in Unsigned v izrazu!"; break;
+		case "limit": s = (english) ? "Concatenation size > 64 bits!" : "Sestavljen signal > 64 bitov!"; break;
 		// simulator errors
 		case "inf": s = (english) ? "Simulation infinite loop!" : "Simulacija v neskončni zanki!"; break;
 		// input errors
