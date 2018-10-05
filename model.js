@@ -113,10 +113,9 @@ stat = new Stat(); // global status object, resource statistics and global tmp v
 function NumConst(n, fmt) { "use strict";
 	let num = 0;
 	let value = [0, 0];
-	let obj = {unsigned:true, size:0};
-	const format = fmt;	
+	let obj = {unsigned:true, size:0, format:fmt};
 	
-	if (n[0]==="-") {
+	if (n[0]==="-") {  // TODO: unary not constant
 		num = Number(n.slice(1));
 		const tmp = vec.op("-", vec.zero, [num, 0]);
 		value = [tmp[0], tmp[1]];
@@ -127,14 +126,21 @@ function NumConst(n, fmt) { "use strict";
 	} else {
 		num = Number(n);
 		value = [num, 0];
-		obj.size = num.toString(2).length;
-		if (logval) {console.log("NumConst "+obj.size);}
+		
+		if (obj.format===undefined) {obj.format="";}
+		if (obj.format[0]==="b") { // TODO: hex constant size
+			obj.size = Number(obj.format.slice(1));
+		} else {
+			obj.size = num.toString(2).length;
+		}
+				
+		if (logval) {console.log("NumConst "+obj.size+" fmt:"+obj.format);}
 	}
 
 	function val() {return value;}
 		
 	function get() {
-		return {type: {id:"num", unsigned:obj.unsigned, size:obj.size}, format:format};
+		return {type: {id:"num", unsigned:obj.unsigned, size:obj.size, format:obj.format}};
 	}
 	
     function visit() {return value[0].toString();}
@@ -257,7 +263,7 @@ function Var(s) { "use strict";
 
 function Op(o, optType) { "use strict";
  let obj = o; //{left:null, op:"", right:null, type:""};
- obj.type = optType===undefined ? {id:"", unsigned:true, size:0} : optType;
+ obj.type = optType===undefined ? {id:"", unsigned:true, size:0, format:""} : optType;
  let numOperands = 0;
  
  function left(v)  {obj.left = v;}
@@ -281,6 +287,7 @@ function Op(o, optType) { "use strict";
 		if (o.type.hasOwnProperty("id")) {obj.type.id = o.type.id; log+=" id:"+o.type.id;}
 		if (o.type.hasOwnProperty("size")) {obj.type.size = o.type.size; log+=" size:"+o.type.size;}
 		if (o.type.hasOwnProperty("unsigned")) {obj.type.unsigned = o.type.unsigned; log+=" u:"+o.type.unsigned;}
+		if (o.type.hasOwnProperty("format")) {obj.type.format = o.type.format; log+=" f:"+o.type.format;}
 	    if (logset) {console.log("Op.set "+obj.op+" type "+log);}
 	}
  }
@@ -406,9 +413,27 @@ function Op(o, optType) { "use strict";
 	return "resize("+str+","+newsize+")";
  }
  
+ function numToVector(numObj, size, forceSize, unsigned) {
+	const str = numObj.emitVHD();  // integer number in string
+	const fmt = numObj.get().type.format;
+	
+	if (fmt[0]==="b") {
+		const sz = (forceSize) ? size : fmt.slice(1);
+		const bin = Number(str).toString(2);
+		const numSz = bin.length;
+		if (numSz <= sz) {
+			return "\""+bin.padStart(sz, '0')+"\"";
+		}		
+		return "\""+bin.slice(-sz)+"\""; // Number overflow
+	} 
+	if (unsigned) {return "to_unsigned("+str+","+size+")";}
+	return "to_signed("+str+","+size+")";
+ }
+ 
  function emitVHD() {
 	let str = "";
 	let numStr = "";
+	let bitStr = "";
 	let exp = "";
 	let op = "";
 	let lt = null;
@@ -485,16 +510,33 @@ function Op(o, optType) { "use strict";
 						str += resizeVar(exp, obj.type.size, 1);
 						
 					} else if (rt.id==="sig") { // 1C
-						if (rt.unsigned) { // convert number to string
-							numStr = "to_unsigned("+obj.left.emitVHD()+","+rt.size+")";
+						if (op==="&") {
+							if (lt.size===1) { // single bit
+								numStr = "'"+obj.left.emitVHD()+"'";
+							} else {
+								numStr = numToVector(obj.left, lt.size, false, rt.unsigned);								
+							}
+							exp = numStr+" "+op+" "+obj.right.emitVHD();
+							if (lt.size+rt.size !== obj.type.size) {
+								str += resizeVar(exp, obj.type.size, 2);
+							} else {
+								str += exp;
+							}
+						} else if (op==="+" || op==="-") {  // sig +/- num do not require integer conversion
+							numStr = obj.left.emitVHD();
+							if (obj.type.size === rt.size) {								
+								str += numStr+" "+op+" "+obj.right.emitVHD();
+							} else {  // resize only sig	
+								str += numStr+" "+op+" resize("+obj.right.emitVHD()+","+(obj.type.size)+")";
+							}					
 						} else {
-							numStr = "to_signed("+obj.left.emitVHD()+","+rt.size+")";							
-						}
-						exp = numStr+" "+op+" "+obj.right.emitVHD();
-						if (rt.size === obj.type.size) {
-							str += exp;
-						} else {
-							str += resizeVar(exp, obj.type.size, 2);
+							numStr = numToVector(obj.left, rt.size, true, rt.unsigned);							
+							exp = numStr+" "+op+" "+obj.right.emitVHD();
+							if (rt.size === obj.type.size) {
+								str += exp;
+							} else {
+								str += resizeVar(exp, obj.type.size, 2);
+							}
 						}
 					} else {
 						console.log("op.emitVHD 1");
@@ -520,21 +562,30 @@ function Op(o, optType) { "use strict";
 							str += resizeVar(exp, obj.type.size, 1);
 						}
 					} else if (rt.id==="sig") { // 2C
-						if (op==="+" || op==="-") { // special for arithmetic op
-							if (rt.unsigned) {
-								str +=  "unsigned'(\"\" & "+obj.left.emitVHD()+") "+op+" "+obj.right.emitVHD();
+						if (op==="&") {
+							exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+							if (lt.size+rt.size !== obj.type.size) {
+								str += resizeVar(exp, obj.type.size, 2);
 							} else {
-								str +=  "signed'(\"\" & "+obj.left.emitVHD()+") "+op+" "+obj.right.emitVHD();
+								str += exp;
 							}
-						} else { // use aggregate for signed & unsigned
-							exp = "(0=>"+obj.left.emitVHD()+", ("+(Number(rt.size)-1)+" downto 1)=>'0') "+ 
-							op+" "+obj.right.emitVHD();
-						}
-						
-						if (rt.size === obj.type.size) {
-							str += exp;
 						} else {
-						   str += resizeVar(exp, obj.type.size, 2);
+							if (op==="+" || op==="-") { // special for arithmetic op
+								if (rt.unsigned) {
+									str +=  "unsigned'(\"\" & "+obj.left.emitVHD()+") "+op+" "+obj.right.emitVHD();
+								} else {
+									str +=  "signed'(\"\" & "+obj.left.emitVHD()+") "+op+" "+obj.right.emitVHD();
+								}
+							} else { // use aggregate for signed & unsigned
+								exp = "(0=>"+obj.left.emitVHD()+", ("+(Number(rt.size)-1)+" downto 1)=>'0') "+ 
+								op+" "+obj.right.emitVHD();
+							}
+							
+							if (rt.size === obj.type.size) {
+								str += exp;
+							} else {
+							   str += resizeVar(exp, obj.type.size, 2);
+							}
 						}
 					} else {
 						console.log("op.emitVHD 2");
@@ -545,11 +596,7 @@ function Op(o, optType) { "use strict";
 							if (rt.size===1) { // single bit
 								numStr = "'"+obj.right.emitVHD()+"'";
 							} else {
-								if (lt.unsigned) { // convert number to string
-									numStr = "to_unsigned("+obj.right.emitVHD()+","+rt.size+")";
-								} else {
-									numStr = "to_signed("+obj.right.emitVHD()+","+rt.size+")";							
-								}	
+								numStr = numToVector(obj.right, rt.size, false, lt.unsigned); // NEW
 							}
 							exp = obj.left.emitVHD()+" "+op+" "+numStr;
 							if (lt.size+rt.size !== obj.type.size) {
@@ -564,12 +611,8 @@ function Op(o, optType) { "use strict";
 							} else {  // resize only sig	
 								str += "resize("+obj.left.emitVHD()+","+(obj.type.size)+") "+op+"  "+numStr;
 							}					
-						} else {						
-							if (lt.unsigned) { // convert number to string
-								numStr = "to_unsigned("+obj.right.emitVHD()+","+lt.size+")";
-							} else {
-								numStr = "to_signed("+obj.right.emitVHD()+","+lt.size+")";							
-							}	
+						} else {
+							numStr = numToVector(obj.right, lt.size, true, lt.unsigned);	
 							exp = obj.left.emitVHD()+" "+op+" "+numStr;
 							// check for size difference
 							
@@ -579,7 +622,7 @@ function Op(o, optType) { "use strict";
 								str += exp;
 							}
 						}						
-					} else if (rt.id==="bit") { // 3B
+					} else if (rt.id==="bit") { // 3B  OK
 						if (op==="&") {
 							exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
 							if (lt.size+rt.size !== obj.type.size) {
@@ -587,17 +630,21 @@ function Op(o, optType) { "use strict";
 							} else {
 								str += exp;
 							}
-						} else {												
-							if (op==="+" || op==="-") { // special for arithmetic op
-								if (lt.unsigned) {
-									str += obj.left.emitVHD()+" "+op+" unsigned'(\"\" & "+obj.right.emitVHD()+")";
-								} else {
-									str += obj.left.emitVHD()+" "+op+" signed'(\"\" & "+obj.right.emitVHD()+")";
-								}
-							} else { // use aggregate for signed & unsigned
-								exp = obj.left.emitVHD()+" "+op+" (0=>"+obj.right.emitVHD()+", ("+(Number(lt.size)-1)+" downto 1)=>'0')";
+						} else if (op==="+" || op==="-") { // special for arithmetic op
+							if (lt.unsigned) {
+								bitStr = " unsigned'(\"\" & "+obj.right.emitVHD()+")";
+							} else {
+								bitStr = " signed'(\"\" & "+obj.right.emitVHD()+")";
 							}
-							
+						
+							if (lt.size === obj.type.size) {
+								str += obj.left.emitVHD()+" "+op+bitStr;
+							} else {
+								str += resizeVar(obj.left.emitVHD(), obj.type.size, 2)+" "+op+bitStr;
+							}							
+						} else { // use aggregate for signed & unsigned
+							exp = obj.left.emitVHD()+" "+op+" (0=>"+obj.right.emitVHD()+", ("+(Number(lt.size)-1)+" downto 1)=>'0')";
+
 							if (lt.size === obj.type.size) {
 								str += exp;
 							} else {
@@ -662,7 +709,7 @@ console.log("Exp: "+exp+"L:"+lt.size+" R:"+rt.size+" Obj:"+obj.type.size);
    target > obj.target
    */
 function Statement(t) {  "use strict"; 
-	let obj = {id: t, target: null, expr: null, ifBlock: null, elseBlock: null, translated: false, level:0, pos:{x:0, y:0}};
+	let obj = {id: t, target: null, expr: null, ifBlock: null, elseBlock: null, translated: false, level:0, pos:{x:0, y:0}, single: -1};
 		
 	function get() {
 		return obj;
@@ -675,6 +722,7 @@ function Statement(t) {  "use strict";
 		if (o.hasOwnProperty("pos")) {obj.pos = o.pos;}
 		if (o.hasOwnProperty("combProc")) {obj.combProc = o.combProc; log+=" cp:"+o.combProc;}
 		if (o.hasOwnProperty("seqProc")) {obj.seqProc = o.seqProc; log+=" sp:"+o.seqProc;}
+		if (o.hasOwnProperty("single")) {obj.single = o.single; log+=" sin:"+o.single;}
 		if (logset) {console.log("Statement.set "+obj.id+log);}
 	}	
 	
@@ -805,6 +853,14 @@ function Statement(t) {  "use strict";
 				
 				str += obj.ifBlock.visit(pass, vars);
 				if (obj.elseBlock!==null) {
+
+					let st0 = obj.elseBlock.statements[0];
+					if (st0!==undefined) {
+						if (st0.get().single===1) {
+							if (obj.single === -1) obj.single = 0;
+							//obj.single = 0; console.log("*****");
+						}
+					}
 					str += "else " + obj.elseBlock.visit(pass, vars);				
 				}
 			} else if (pass===2) {				
@@ -925,13 +981,24 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 					str += st.emitVHD(indent, isComb);
 				});
 				if (obj.elseBlock!==null) {
-					str += spaces+"else\n";
-					obj.elseBlock.statements.forEach(function(st) {
-						str += st.emitVHD(indent,  isComb);
-					});			
+					if (obj.single>=0) {
+						let elseStr = obj.elseBlock.statements[0].emitVHD(indent,  isComb);
+						if (elseStr.trim().substring(0,3)==="if ") {
+							str += spaces+"els"+elseStr.trim()+"\n";
+						} else {						
+							str += spaces+"else\n"+elseStr;
+						}
+					} else {
+						str += spaces+"else\n";
+						obj.elseBlock.statements.forEach(function(st) {
+							str += st.emitVHD(indent,  isComb);
+						});		
+					}					
 				}
 
-				str += spaces + "end if;\n";
+				if (obj.single<=0) {
+					str += spaces + "end if;\n";
+				}
 			}
 		}
 		return str;

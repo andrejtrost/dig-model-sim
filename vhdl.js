@@ -3,7 +3,7 @@
 
 function makeBold(input) {
  const keywords=["library","use","all","entity","port","in","out","is","begin","end", "architecture","downto","of",
-                 "signal","constant","process","if", "then", "else", "map", "time", "wait", "for"];
+                 "signal","constant","process","if", "then", "else", "elsif", "map", "time", "wait", "for"];
  return input.replace(new RegExp('(\\b)(' + keywords.join('|') + ')(\\b)','ig'), '$1<b class="w3-text-indigo">$2</b>$3');
 }
 
@@ -128,7 +128,7 @@ console.log("VHDLcomb: "+hdl(st.get().target).assignments);
 		});
 
 	
-		s+= "end process\n";
+		s+= "end process;\n";
 	}
 	
 	
@@ -194,8 +194,9 @@ function searchSeq(b) {
 
 function VHDLout() {
 	let combProc = false;
+	parseCode(); // try to parse model
 	if (model) {
-	  if (model.changed()) {parseCode();}	// recompile on change
+	  //if (model.changed()) {parseCode();}	// recompile on change
 		
 	  // mark comb if statements
 	  let b = model.getBlok();

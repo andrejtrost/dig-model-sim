@@ -170,7 +170,7 @@ function Parse(k) {
 				//let r = vec.op("-", vec.zero, [n, 0]);
 //console.log("Result: "+r);				
 				
-				v = new NumConst(t.id+consume().id);
+				v = new NumConst(t.id+consume().id); // TODO format
 				//n.op(t.id);
 				//n.right(v);
 				//n.set({type: type(v)});
@@ -187,7 +187,8 @@ function Parse(k) {
 			return n;
 		}
 		else if (t.isNum()) { // number
-			let num = new NumConst(consume().id); 
+			let token = consume();
+			let num = new NumConst(token.id, token.format()); 
 			n.left(num); 			
 			n.set({type: type(num)});
 			return n;
@@ -396,7 +397,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		while (peek().isSeparator()) {consume();}
 	}
 	
-	function parseIf(pos)
+	function parseIf(pos, oneStatement)
 	{		
 		let ifst = new Statement("if");
 		ifst.set({level: Number(circ.getBlok().get().level)});
@@ -413,18 +414,35 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		
 		let saveBlok = circ.getBlok();
 		let level = saveBlok.get().level;
-		ifblok.set({level: (Number(level)+1)}); // set new block level a.set({level: level});
+		if (oneStatement) { 
+console.log("Reverse level...");
+			ifst.set({level: (Number(level)-1)});
+			ifblok.set({level: (Number(level))});
+		}
+		else { ifblok.set({level: (Number(level)+1)}); }
 		
-		circ.setBlok(ifblok);		
-		parseBlock(ifblok);
+		circ.setBlok(ifblok);
+
+		let n = peek().id;
+		if (n==="n" || n==="{") {	// new line or {, expect new block
+			parseBlock(ifblok, false);
+		} else {
+			parseBlock(ifblok, true); // one statement block
+		}
 		
 		skipSeparators();		
 		if (peek().id==="else") {
 			consume();
 			elseBlok = new Blok("else");
-			elseBlok.set({level: (Number(level)+1)});
-			circ.setBlok(elseBlok);			
-			parseBlock(elseBlok);
+			if (oneStatement) { elseBlok.set({level: (Number(level))}); }
+			else { elseBlok.set({level: (Number(level)+1)}); }
+			circ.setBlok(elseBlok);	
+			n = peek().id;
+			if (n==="n" || n==="{") {	
+				parseBlock(elseBlok, false);
+			} else {  
+				parseBlock(elseBlok, true);  // one statement block
+			}			
 		}
 		
 		ifst.setIf(ifblok, elseBlok);
@@ -433,7 +451,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		return ifst;
 	}	
 	
-	function parseStatement() // parse & return known statement or null
+	function parseStatement(oneStatement) // parse & return known statement or null
 	{		
 		let statement = null;
 		
@@ -456,12 +474,12 @@ console.log("parse:condition type: "+typeToString(type(n)));
 						
 			if (op==="<=") {circ.setSeq(true);}
 		  } else { 
-			throw parseErr("unexp", peek().id);  //"Unexpected token: '"+peek().id+"'!"
+			throw parseErr("exp", "=");  //"Unexpected token: '"+peek().id+"'!"
 		  }		  
 		} else if (t.id==="if") {
 			let pos = t.pos();			
 			consume();			
-			statement = parseIf(pos); // return statement or undefined 
+			statement = parseIf(pos, oneStatement); // return statement or undefined 
 		} else if (t.id==="{") {
 			throw parseErr("unexp", "{");			
 		} else if (t.id==="}") {   // return witout parsing
@@ -472,22 +490,30 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		return statement;		
 	}
 	
-	function parseBlock(c) {
+	function parseBlock(c, oneStatement) {    // c = Blok(), oneStatement: bool
 		let t = peek();
 		let statement = null;
-				
-		while (t.isSeparator()) { consume(); t=peek();}
-		takeToken("{");				
-		do {
-			statement = parseStatement();
+		
+		if (oneStatement) { // parse one statement Block (eg. if (c) St)
+			statement = parseStatement(oneStatement);
+			statement.set({single: 1});
 			if (statement!==null) {
 				c.push(statement);
 			}
-			t = peek();	
-			if (t.isEOF()) {break;}
-		} while (t.id!=="}");  // isEnd > isEOF	
-		
-		takeToken("}");
+		} else {
+			while (t.isSeparator()) { consume(); t=peek();}
+			takeToken("{");				
+			do {
+				statement = parseStatement(oneStatement);
+				if (statement!==null) {
+					c.push(statement);
+				}
+				t = peek();	
+				if (t.isEOF()) {break;}
+			} while (t.id!=="}");  // isEnd > isEOF	
+			
+			takeToken("}");
+		}
 	}
 	
   try {	  
