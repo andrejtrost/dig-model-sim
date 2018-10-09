@@ -26,7 +26,7 @@ function Token(tokenName, tokenType, position, numFormat) {
  const id = tokenName;
  const type = tokenType;
  const xy = position;
- const fmt = numFormat;  // number format: 0=decimal, 1=binary, 2=hex
+ const fmt = numFormat;  // number format: d|b|h + digit count
  
  function isID() {return (type==="id");}
  function isNum() {return (type==="num");} 
@@ -91,17 +91,17 @@ function Lexer(txt) {
 			   getCh();
 			   z = "";
 			   while (isHexDigit(nextCh)) {z += getCh();}
-			   if (z!=="") { look = new Token(parseInt(z, 16), "num", pos0, 2); } 
+			   if (z!=="") { look = new Token(parseInt(z, 16), "num", pos0, "h"+z.length); } 
 			   else { look = new Token("0x", "?", pos0); }
 			} else if ((z==="0") && (nextCh==="b" || nextCh==="B")) { // BIN ?
 			   getCh();
 			   z = "";
 			   while (nextCh==="0" || nextCh==="1") {z += getCh();}
-			   if (z!=="") { look = new Token(parseInt(z, 2), "num", pos0, 1); } 
+			   if (z!=="") { look = new Token(parseInt(z, 2), "num", pos0, "b"+z.length); } //TODO save number size!
 			   else { look = new Token("0b", "?", pos0); }			   
 			} else {			
 			  while (isDigit(nextCh)) {z += getCh();}
-			  look = new Token(z, "num", pos0, 0);
+			  look = new Token(z, "num", pos0, "d"+z.length);
 			}
 		} else if (isIDStart(nextCh)) {
 			z = getCh();
@@ -119,7 +119,7 @@ function Lexer(txt) {
 		} else {
 			if (nextCh==="\n") {				
 				getCh(); // read new line
-				look = new Token("n", "\n",pos); 				
+				look = new Token("\n", "\n",pos); 				
 				pos.y+=1; pos.x=0;
 			}
 			else { // operators
@@ -179,7 +179,7 @@ function Lexer(txt) {
 					look = new Token(nextCh, "op", pos);
 					getCh();
 				} else if (nextCh==="{" || nextCh==="}") {
-					look = new Token(nextCh, "()", pos);
+					look = new Token(nextCh, nextCh, pos); // type: { or }
 					getCh();					
 			    } else { // vse ostalo
 					look = new Token(nextCh, "?", pos);

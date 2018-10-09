@@ -7,6 +7,8 @@ const textID = "vhdl";
 const MAXITER = 20;
 const MAXCYC = 1000;
 
+let globPrevStatement="";
+
 let vec=new Vector();
 //let model = undefined;
 
@@ -255,7 +257,7 @@ function Parse(k) {
 		if (x === undefined) {return;}
 		//console.log("term type: "+x.getType().size);
 		
-		while (peek().id==="+" || peek().id==="-" || peek().id==="|" || peek().id==="^" || peek().id===",") { // TODO ,
+		while (peek().id==="+" || peek().id==="-" || peek().id==="|" || peek().id==="^") { // TODO ,
 			o = consume().id;
 			
 			if (x.getOp()==="") { // set empty or create new operation
@@ -268,15 +270,10 @@ function Parse(k) {
 			// second term
 			let x2 = term(new Op({op:"", left:null, right:null}));
 			x.right(x2);
-			
-			
+						
 			let sz = Math.max(type(x).size, type(x2).size);			
-			console.log("Sum  "+sz);
-			if (o==="+" || o==="-") {sz += 1;}
-			else if (o===",") {
-				sz = type(x).size + type(x2).size;
-				if (sz>64) {throw parseErr("limit");}
-			}
+			//console.log("Sum  "+sz);
+			if (o==="+" || o==="-") {sz += 1;}			
 			const u1 = type(x).unsigned;
 			const u2 = type(x2).unsigned;
 			if ((u1 && !u2) || (!u1 && u2)) {
@@ -291,6 +288,39 @@ function Parse(k) {
 		return x;
 	}
 	
+	function exprList(n) {
+		let x = expression(n);
+		let o = "?";
+		if (x === undefined) {return;}
+		//console.log("term type: "+x.getType().size);
+		
+		while (peek().id===",") { // expression list, concatenation operator
+			o = consume().id;
+			
+			if (x.getOp()==="") { // set empty or create new operation
+				x.op(o);
+			} else {
+				const opType={...type(x)};   //copy type property
+				x = new Op({op:o, left:x, right:null}, opType); // type(x)
+			}
+			
+			// second term
+			let x2 = term(new Op({op:"", left:null, right:null}));
+			x.right(x2);
+
+			let sz = type(x).size + type(x2).size;
+			if (sz>64) {throw parseErr("limit");}
+			
+			const u1 = type(x).unsigned;
+			const u2 = type(x2).unsigned;
+			/*if ((u1 && !u2) || (!u1 && u2)) {
+				throw parseErr("mixs");        // TODO: maybe no error?
+			}*/
+			// set operator sign of the left
+			x.set({type: {unsigned: u1, size: sz}});
+		}
+		return x;
+	}	
 	
 	function parseAssign(v, op, pos) // assignment expression (take var v)
 	{
@@ -302,11 +332,12 @@ function Parse(k) {
 		
 		// opnode
 		let node = new Op({op:"", left:null, right:null});		
-		node = expression(node);
+		node = exprList(node);
 
 		if (node === undefined) {return;}
 		a.setExpr(node);
 		
+		globPrevStatement="a";
 		return a;
 	}
 	
@@ -323,10 +354,16 @@ function Parse(k) {
 //console.log("parse:com: "+e.visit(true)+" Ctype: "+typeToString(type(e)));	
 		if (e === undefined) {return;}
 		
+		//let isVar = false;
 		if (isComparisonOp(peek().id)) {
 			let o = consume().id;
 			if (e.getOp()==="") { // prazna operacija
 				e.op(o);
+				// check for id ==
+				//if (o==="==" ) {
+				//	if (e.getLeft().get().isVar) {isVar = true;}
+				//}
+			
 			} else {
 				e = new Op({op:o, left:e, right:null});
 			}			
@@ -334,13 +371,16 @@ function Parse(k) {
 			let e2= expression(new Op({op:"", left:null, right:null}));
 
 			e.right(e2);
+			//if (isVar && type(e2).id==="num") {
+//console.log("FOUND id==num!!");
+			//}
 			
 		    // check if compare sig of same type or sig & num
 			
 			let sz = Math.max(type(e).size, type(e2).size);
 			let u = type(e).unsigned && type(e2).unsigned;
 			e.set({type: {unsigned: u, size: sz}});
-
+			
 		} else { // add required operator (value != 0)			
 			let o = "!=";
 			let rightObj = new NumConst(0); 
@@ -397,8 +437,9 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		while (peek().isSeparator()) {consume();}
 	}
 	
-	function parseIf(pos, oneStatement)
+	function parseIf(pos, oneStatement) //******** IF ***********
 	{		
+console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);	
 		let ifst = new Statement("if");
 		ifst.set({level: Number(circ.getBlok().get().level)});
 		ifst.set({pos: pos});
@@ -412,19 +453,26 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		ifst.setExpr(c);		
 		takeToken(")");
 		
+		let elsif = (oneStatement && globPrevStatement==="else") ? true : false;
+		
+		globPrevStatement="if";
+		
 		let saveBlok = circ.getBlok();
 		let level = saveBlok.get().level;
-		if (oneStatement) { 
-console.log("Reverse level...");
-			ifst.set({level: (Number(level)-1)});
+		// if following else > elseif
+		if (elsif) {
+			ifst.set({level: (Number(level)-1)}); // Reverse level...
+			ifst.set({elsif: 1});
 			ifblok.set({level: (Number(level))});
 		}
-		else { ifblok.set({level: (Number(level)+1)}); }
+		else {
+			ifblok.set({level: (Number(level)+1)}); 
+		}
 		
 		circ.setBlok(ifblok);
 
-		let n = peek().id;
-		if (n==="n" || n==="{") {	// new line or {, expect new block
+		let n = peek().id;	
+		if (n==="\n" || n==="{") {	// new line or {, expect new block
 			parseBlock(ifblok, false);
 		} else {
 			parseBlock(ifblok, true); // one statement block
@@ -434,14 +482,19 @@ console.log("Reverse level...");
 		if (peek().id==="else") {
 			consume();
 			elseBlok = new Blok("else");
-			if (oneStatement) { elseBlok.set({level: (Number(level))}); }
-			else { elseBlok.set({level: (Number(level)+1)}); }
+
+            globPrevStatement="else";
+			if (elsif) {
+				elseBlok.set({level: (Number(level))}); 
+			} else { 			
+				elseBlok.set({level: (Number(level)+1)}); 
+			}
 			circ.setBlok(elseBlok);	
 			n = peek().id;
-			if (n==="n" || n==="{") {	
+			if (n==="\n" || n==="{") {				
 				parseBlock(elseBlok, false);
 			} else {  
-				parseBlock(elseBlok, true);  // one statement block
+				parseBlock(elseBlok, true);  // one statement block				
 			}			
 		}
 		
@@ -473,6 +526,7 @@ console.log("Reverse level...");
 			statement = parseAssign(v, op, pos); // return statement or undefined
 						
 			if (op==="<=") {circ.setSeq(true);}
+			
 		  } else { 
 			throw parseErr("exp", "=");  //"Unexpected token: '"+peek().id+"'!"
 		  }		  
@@ -495,8 +549,8 @@ console.log("Reverse level...");
 		let statement = null;
 		
 		if (oneStatement) { // parse one statement Block (eg. if (c) St)
-			statement = parseStatement(oneStatement);
-			statement.set({single: 1});
+			statement = parseStatement(oneStatement);			
+			//statement.set({single: 1});
 			if (statement!==null) {
 				c.push(statement);
 			}
@@ -572,12 +626,19 @@ console.log("Reverse level...");
 	  setStat(stat.emit());	  
 	  
 	  if (log) {
+		let sigmode = "";
+		let as = "";
 		console.log(logStr);  // log parsed tree and signals
 		console.log("Sequential: "+circ.getSeq());
 		console.log("Signals: ");
 		circ.vars.forEach(function(v) {
-			console.log(v.visit()+" "+type(v).id+" val="+vec.out(v.val(), type(v).unsigned)+" mode="+mode(v)+" type="+typeToString(type(v))+
-			" "+type(v).id+" hdl="+hdl(v).mode+" ");
+			sigmode = ",";
+			if (hdl(v).mode!==undefined) sigmode=","+hdl(v).mode;
+			as = ",";
+			if (hdl(v).assignop!==undefined) as=","+hdl(v).assignop+hdl(v).assignments;
+			console.log(v.visit()+":"+type(v).id+" "+ //" val="+vec.out(v.val(), type(v).unsigned)+" mode="+mode(v)+" type="+
+			typeToString(type(v))+sigmode+as);
+			//" "+type(v).id+" hdl="+hdl(v).mode+" ");
 		});
 	  }	  
 	  setLog("Parse finished.");

@@ -2,8 +2,10 @@
 /*jshint esversion: 6 */
 
 function makeBold(input) {
- const keywords=["library","use","all","entity","port","in","out","is","begin","end", "architecture","downto","of",
-                 "signal","constant","process","if", "then", "else", "elsif", "map", "time", "wait", "for"];
+ const keywords=["library","use","all","entity","port","in","out","is","begin",
+ "end", "architecture","downto","of", "signal","constant","process",
+ "if", "then", "else", "elsif", "null", "case", "when", "others", 
+ "map", "time", "wait", "for"];
  return input.replace(new RegExp('(\\b)(' + keywords.join('|') + ')(\\b)','ig'), '$1<b class="w3-text-indigo">$2</b>$3');
 }
 

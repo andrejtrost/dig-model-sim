@@ -159,7 +159,7 @@ function NumConst(n, fmt) { "use strict";
 
 
 function Var(s) { "use strict";
- let obj = {name:s, mode:"", type:{id:"sig", unsigned:true, size:0}, mask:[0, 0], hdl:{}}; // target:"" or "=" numtarget:0, 1, 
+ let obj = {isVar:true, name:s, mode:"", type:{id:"sig", unsigned:true, size:0}, mask:[0, 0], hdl:{}}; // target:"" or "=" numtarget:0, 1, 
  let value = [0, 0];
  let nextValue = [0, 0];
  let update = false;
@@ -399,14 +399,14 @@ function Op(o, optType) { "use strict";
 		} 
 	}
 	numOperands = no;
-//console.log("END Op.Visit: "+obj.op+" type: '"+obj.type.id+"' "+obj.type.size+" "+obj.type.unsigned);
+//console.log("END Op.Visit: "+obj.op+" type: '"+obj.type.id+"' "+obj.type.size+" "+obj.type.unsigned+" num"+no);
 	return str;
  }
 
  function resizeVar(str, newsize, oldsize) {  // resize sig or bit
     if (newsize === oldsize) return str;
 	if (Number(oldsize)===1) {
-		return "((0 => "+str+", others => '0'))"; // (( začasno, da ne pobriše))
+		return "(0 => "+str+", others => '0')"; // (( začasno, da ne pobriše)) TODO
 	} else if (Number(newsize)===1) {
 		return str+"(0)";
 	}
@@ -428,6 +428,15 @@ function Op(o, optType) { "use strict";
 	} 
 	if (unsigned) {return "to_unsigned("+str+","+size+")";}
 	return "to_signed("+str+","+size+")";
+ }
+ 
+ function sigSign(obj, unsigned) {   // convert sig to unsigned/signed
+	if (unsigned && !type(obj).unsigned) {
+		 return "unsigned("+obj.emitVHD()+")";
+	} else if (!unsigned && type(obj).unsigned) {
+		 return "signed("+obj.emitVHD()+")";
+	}
+	return obj.emitVHD();
  }
  
  function emitVHD() {
@@ -488,11 +497,11 @@ function Op(o, optType) { "use strict";
 //console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
  			if (isComparisonOp(obj.op)) { // handle comparison
 				if ((lt.id==="bit") && (rt.id==="num")) {
-					str = obj.left.emitVHD()+" "+op+" '"+obj.right.emitVHD()+"'";
+					return obj.left.emitVHD()+" "+op+" '"+obj.right.emitVHD()+"'";
 				} else if ((lt.id==="num") && (rt.id==="bit")) {
-					str = "'"+obj.left.emitVHD()+"' "+op+" "+obj.right.emitVHD();
+					return "'"+obj.left.emitVHD()+"' "+op+" "+obj.right.emitVHD();
 				} else {
-					str = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
+					return obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 				}
 			} else {
 				
@@ -659,8 +668,10 @@ function Op(o, optType) { "use strict";
 						} else if (op==="*") {
 							str += resizeVar(obj.left.emitVHD()+op+obj.right.emitVHD(), obj.type.size, lt.size+rt.size);
 						} else if (op==="&") {
-							exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
-console.log("Exp: "+exp+"L:"+lt.size+" R:"+rt.size+" Obj:"+obj.type.size);
+							//exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+							exp = sigSign(obj.left,obj.type.unsigned)+" "+op+" "+
+							      sigSign(obj.right,obj.type.unsigned);
+console.log("Exp: "+exp+"L:"+lt.size+lt.unsigned+" R:"+rt.size+rt.unsigned+" Obj:"+obj.type.size);
 							if (lt.size+rt.size !== obj.type.size) {
 								str += resizeVar(exp, obj.type.size, 2);
 							} else {
@@ -709,7 +720,7 @@ console.log("Exp: "+exp+"L:"+lt.size+" R:"+rt.size+" Obj:"+obj.type.size);
    target > obj.target
    */
 function Statement(t) {  "use strict"; 
-	let obj = {id: t, target: null, expr: null, ifBlock: null, elseBlock: null, translated: false, level:0, pos:{x:0, y:0}, single: -1};
+	let obj = {id: t, target: null, expr: null, ifBlock: null, elseBlock: null, translated: false, level:0, pos:{x:0, y:0}, elsif: 0};
 		
 	function get() {
 		return obj;
@@ -722,7 +733,8 @@ function Statement(t) {  "use strict";
 		if (o.hasOwnProperty("pos")) {obj.pos = o.pos;}
 		if (o.hasOwnProperty("combProc")) {obj.combProc = o.combProc; log+=" cp:"+o.combProc;}
 		if (o.hasOwnProperty("seqProc")) {obj.seqProc = o.seqProc; log+=" sp:"+o.seqProc;}
-		if (o.hasOwnProperty("single")) {obj.single = o.single; log+=" sin:"+o.single;}
+		if (o.hasOwnProperty("elsif")) {obj.elsif = o.elsif; log+=" elsif:"+o.elsif;}
+		if (o.hasOwnProperty("elsLink")) {obj.elsLink = o.elsLink; log+=" elsLink";}
 		if (logset) {console.log("Statement.set "+obj.id+log);}
 	}	
 	
@@ -845,29 +857,62 @@ function Statement(t) {  "use strict";
 			
 		} else if (obj.id==="if") {
 			if (pass===1) {
+				str += "<"+obj.elsif+">";
 				stat.initItem();
 				str += obj.expr.visit()+"\n";
 				for (const id of stat.getItem()) {
 					setHdlMode(vars.get(id), "in");
 				}
 				
+				if (obj.expr.getOp()==="==") { // test var == num
+					if (obj.expr.getLeft().get().isVar && type(obj.expr.getRight()).id==="num") {
+						obj.conEqualId=obj.expr.getLeft().get().name;
+					}
+				}
+				
 				str += obj.ifBlock.visit(pass, vars);
-				if (obj.elseBlock!==null) {
+				if (obj.elseBlock!==null) {  // visit else
 
 					let st0 = obj.elseBlock.statements[0];
-					if (st0!==undefined) {
-						if (st0.get().single===1) {
-							if (obj.single === -1) obj.single = 0;
-							//obj.single = 0; console.log("*****");
+					if (st0!==undefined && st0.get().id==="if") {  // else if
+//console.log("Visit ELSE: "+st0.get().expr.visit(1));						
+						let mainLink = obj.elsLink;
+//console.log("Mainlink: "+mainLink);
+						if (mainLink===undefined) {st0.set({elsLink: obj});}
+						else {st0.set({elsLink: mainLink});}
+						
+						if (st0.get().elsif===1) {
+							obj.els = true; // NOVO
 						}
 					}
 					str += "else " + obj.elseBlock.visit(pass, vars);				
 				}
-			} else if (pass===2) {				
+			} else if (pass===2) {
 				str += obj.ifBlock.visit(pass, vars);
 				if (obj.elseBlock!==null) {
+					let st0 = obj.elseBlock.statements[0];
+					if (st0!==undefined) {
+						const obj=st0.get().elsLink;
+						if (st0.get().id==="if") {
+//console.log("PASS2: IF: "+st0.get().expr.visit(1)+" > "+st0.get().conEqualId+" < "+st0.get().elsLink.conEqualId);
+							if (st0.get().elsLink.conEqualId!==undefined && st0.get().elsLink.conEqualId!=="") {
+								if (st0.get().conEqualId === st0.get().elsLink.conEqualId) {
+									if (obj.isCase!==false) {obj.isCase = true;} // if undefined | true								
+								} else {
+									obj.isCase = false;
+								}
+							}
+							if (st0.get().elseBlock) { // statement has else block
+								obj.isOthers = true;								
+							} else {
+								obj.isOthers = false;																
+							}
+						} 
+					}						
+					
 					str += "else " + obj.elseBlock.visit(pass, vars);				
 				}
+				if (obj.isCase) {setLog("Opt: if transformed to case!");}
 			}
 		}
 		return str;
@@ -879,7 +924,7 @@ function Statement(t) {  "use strict";
 		let spaces = " ".repeat(indent)+" ".repeat(3*Number(obj.level));
 		let expStr = "";
 		let num = 0;
-		if ((obj.id==="=" && isComb) || (obj.id==="<=" && !isComb)) {	// assignment						
+		if ((obj.id==="=" && isComb) || (obj.id==="<=" && !isComb)) {	// assignment
 			if (obj.expr === null) {return "?";} // unexpected empty expression
 						
 			expStr = obj.expr.emitVHD();
@@ -964,40 +1009,68 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 					}
 				}
 			}	
-
+//console.log("Slice ()"+str);
 			if (str.slice(0,1)==="(" && str.slice(-1)===")") {
-				console.log("Slice ()");
+				
 				str = str.slice(1, -1);
 			}
 			str = spaces + obj.target.visit()+" <= "+str+";\n";
 			
 			//str += "\n";
-		} else if (obj.id==="if") {  // if statement, check if belongs to comb 
-			if ((obj.combProc && isComb) || (obj.seqProc && !isComb)) {
+		} else if (obj.id==="if") {  // if statement, check if belongs to comb
+			let doCase = obj.isCase || (obj.elsLink!==undefined && obj.elsLink.isCase) ? true : false;
 			
-				str = spaces+"if "+obj.expr.emitVHD()+" then\n";
-
-				obj.ifBlock.statements.forEach(function (st) {
-					str += st.emitVHD(indent, isComb);
-				});
-				if (obj.elseBlock!==null) {
-					if (obj.single>=0) {
-						let elseStr = obj.elseBlock.statements[0].emitVHD(indent,  isComb);
-						if (elseStr.trim().substring(0,3)==="if ") {
-							str += spaces+"els"+elseStr.trim()+"\n";
-						} else {						
-							str += spaces+"else\n"+elseStr;
-						}
+		
+			if ((obj.combProc && isComb) || (obj.seqProc && !isComb)) {
+				str = "";
+				if (obj.elsif!==1) { // start new conditional statement
+					if (obj.els && obj.isCase) { 
+						str += spaces + "case "+obj.expr.getLeft().emitVHD()+" is\n"; 
+						str += spaces + " when "+obj.expr.getRight().emitVHD()+" =>\n";
+					} else { str += spaces + "if "+obj.expr.emitVHD()+" then\n"; }
+				} else {            // continue conditional (elsif or when)					
+					if (doCase) { 
+						str += " when "+obj.expr.getRight().emitVHD()+" =>\n";
 					} else {
-						str += spaces+"else\n";
-						obj.elseBlock.statements.forEach(function(st) {
-							str += st.emitVHD(indent,  isComb);
-						});		
-					}					
+						str += "if "+obj.expr.emitVHD()+" then\n";
+					}
+				}
+								
+				//if (obj.elsif!==1) { str += spaces; } // no leading spaces for elsif 
+				//str += "if "+obj.expr.emitVHD()+" then\n";
+				
+				let ifBodyStr="";
+				obj.ifBlock.statements.forEach(function (st) {
+					ifBodyStr += st.emitVHD(indent, isComb);
+				});
+				
+				if (ifBodyStr==="") {str += spaces+"   null;\n";} // null statement
+				else { str += ifBodyStr; }
+				
+				if (obj.elseBlock!==null) { // transform else block
+					let elseStr="";
+
+					if (obj.els) { 
+						if (doCase) { str += spaces; } // ...+when
+						else { str += spaces+"els"; }  // ...+els+if
+					} else {
+						if (doCase && obj.elsif===1 && !obj.els) { str+=spaces+" when others =>\n"; }
+						else {str += spaces+"else\n"; }
+					}
+					
+					obj.elseBlock.statements.forEach(function(st) {
+						elseStr += st.emitVHD(indent,  isComb);
+					});	
+					str += elseStr;
+							
+					if (elseStr==="") {str += spaces+"   null;\n";} // null statement					
 				}
 
-				if (obj.single<=0) {
-					str += spaces + "end if;\n";
+				if (obj.elsif!==1) { // end if (case)
+					if (doCase) {
+						if (obj.isOthers===false) { str += spaces+" when others => null;\n";}
+						str += spaces + "end case;\n";
+					} else { str += spaces + "end if;\n"; }
 				}
 			}
 		}
