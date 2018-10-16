@@ -123,6 +123,7 @@ function Vec(name, mode, type, size) {
  Sig.call(this, name, mode, type);
  this.type = type;
  this.size = size;
+ this.format = "d"+size;
 
  if (type=="signed") {
 	this.min = -Math.pow(2,Math.abs(size-1));
@@ -185,8 +186,7 @@ function graf_refresh()  /* posodobi tabeli ports[] in signals[][], prikaz zoom(
 	var n = 0;
 	var ime = "";
 	var tip_sig = "unsigned";
-	var portslen = ports.length;
-	
+	var portslen = ports.length;	
 	var change = false;  // test, if ports changed
 	if (portslen!==s.size) {change=true; console.log("Num difference");}
 	else {
@@ -194,6 +194,8 @@ function graf_refresh()  /* posodobi tabeli ports[] in signals[][], prikaz zoom(
 	  s.forEach(function (val, id) {
 		//console.log("PPP: "+id+" "+ports[n].name);
 		if (id!==ports[n].name) { change=true; console.log("Name difference"); }
+
+		if (val.mode!==ports[n].mode) { change=true; console.log("Mode difference"); }
 		var tip_sig = "unsigned";
 		if (val.type.unsigned===false) {tip_sig = "signed";}
 		if (val.type.size===1) {tip_sig = "std_logic";}
@@ -373,7 +375,18 @@ function draw_bit(r, nstart, nend, vvs, vns, in_out)  /* risanje enobitnega sign
   }
 }
 
-function draw_bus(r, nstart, nend, vvs, vns, in_out)  // risanje vodila, glob. signals[][]
+ function numToBin(numStr, size) { // number to binary string 
+ 	let bin = Number(numStr)
+	if (bin<0) bin = bin & ( Math.pow(2, size) - 1);
+	bin = bin.toString(2);
+	const numSz = bin.length;
+	if (numSz <= size) {
+		return bin.padStart(size, '0');
+	}		
+	return bin.slice(-size); // Number overflow
+ }
+
+function draw_bus(r, nstart, nend, vvs, vns, in_out, fmt)  // risanje vodila, glob. signals[][]
 { 
  if (ctx) {  
   ctx.beginPath();
@@ -409,20 +422,23 @@ function draw_bus(r, nstart, nend, vvs, vns, in_out)  // risanje vodila, glob. s
   var last;
   var first = 0;
   var value = signals[r][nstart];
+  strValue = (fmt[0]==="b") ? numToBin(signals[r][nstart], fmt.slice(1)) : signals[r][nstart]; 
   
   ctx.font = "12px Verdana"; //Vrednosti vodila na grafu
   ctx.textAlign="center";
-  ctx.fillStyle = "black";
+  ctx.fillStyle = (fmt[0]==="b") ? "blue" : "black";
   
   for (j=1; j < nend-nstart; j++) {
 	if (signals[r][nstart+j] != value) {
-	    if ((j-first)*wave.dx() > ctx.measureText(value).width) //izpis, ce je dovolj prostora
-	      ctx.fillText(value, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);		
+	    if ((j-first)*wave.dx() > ctx.measureText(strValue).width) //izpis, ce je dovolj prostora		  
+	      ctx.fillText(strValue, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);		
 		value = signals[r][nstart+j];
+		strValue = (fmt[0]==="b") ? numToBin(signals[r][nstart+j], fmt.slice(1)) : signals[r][nstart+j];
 		first = j;
 	}
   }
-  ctx.fillText(value, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);
+  
+  ctx.fillText(strValue, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);
   
  }
 }
@@ -480,7 +496,7 @@ function graf_plot()  //izris vseh signalov v razpredelnici
         ctx.beginPath();
 
 		if (ports[n].type == "std_logic") draw_bit(n, nstart, nend, vvs, vns, ports[n].mode);        
-        else draw_bus(n, nstart, nend, vvs, vns, ports[n].mode);
+        else draw_bus(n, nstart, nend, vvs, vns, ports[n].mode, ports[n].format); //*******
     }
 	
   }
@@ -519,48 +535,64 @@ function graf_click(e) {
 
 	console.log("cy="+cy+" cx="+cx+",nstart="+nstart+" nend="+nend);
 	
-	// Sprememba celotnega signala ob kliku na ime signala
+	// Click on the signal name
     if (cx0==-1 && cy>=0 && cy<vrstice) {
-	  if (clickType===1 && ports[cy].mode==="in") {
-		  var value=0;
-		  var limit=false;
-		  if (signals[cy][0] == 0) {
-			if (ports[cy] instanceof Vec) {				
+	  if (clickType===1 && e.button===2) { // right click to change display format
+		if (ports[cy] instanceof Vec) {
+			const size = ports[cy].format.slice(1);
+			if (ports[cy].format[0]==="d") {ports[cy].format = "b"+size;}
+			else {ports[cy].format = "d"+size;}
+			graf();
+		}
+	  } else if (clickType===1 && ports[cy].mode==="in") { // left click, change all cycles
+		var value=0;
+		var limit=false;
+		if (signals[cy][0] == 0) {
+			if (ports[cy] instanceof Vec) {
 				if (bus>=ports[cy].min && bus<=ports[cy].max) value = bus;
 				else limit=true;
 			} else value=1;
-		  }
-		  
-		  if (limit) { alert("Value out of limits!") }
-		  else {	  
-		   var r = confirm("SET "+ports[cy].name+" = "+value+" ?");
-		  
-		   if (r == true) {
+		}
+
+		if (limit) { alert("Value out of limits!") }
+		else {	  
+			var r = confirm("SET "+ports[cy].name+" = "+value+" ?"); 
+
+			if (r == true) {
 			for (c = 0; c < cycles; c++) signals[cy][c] = value;
 			graf();
-		   }
-		  }
-	  }
-	} else // Sprememba vrednosti posameznih ciklov
-	
-	if (cx>=nstart && cx<nend && cy>=0 && cy<vrstice && ports[cy].mode==="in") {        
-        if (ports[cy] instanceof Vec)  {
-            if (bus>=ports[cy].min && bus<=ports[cy].max) {
-				signals[cy][cx] = bus;
-                graf();
-			} else {
-                alert("Value out of limits: "+ports[cy].min+" .. "+ports[cy].max);
-            }
-        } else {
-			if (clickType===1) { // click
-				if (signals[cy][cx] == 0) firstClickVal = 1;
-				else firstClickVal = 0;
 			}
-			
-			signals[cy][cx] = firstClickVal;
-			graf();
-        }             
-   }       
+		}		 
+	  }
+	} else // click on signal trace
+	
+	if (cx>=nstart && cx<nend && cy>=0 && cy<vrstice) {
+		if (e.button===2) { // right click to change display format
+			if (ports[cy] instanceof Vec) {
+				const size = ports[cy].format.slice(1);
+				if (ports[cy].format[0]==="d") {ports[cy].format = "b"+size;}
+				else {ports[cy].format = "d"+size;}
+				graf();
+			}		
+		} else if (ports[cy].mode==="in") {  // left click, change value
+			if (ports[cy] instanceof Vec)  {
+				if (bus>=ports[cy].min && bus<=ports[cy].max) {
+					signals[cy][cx] = bus;
+					graf();
+				} else {
+					alert("Value out of limits: "+ports[cy].min+" .. "+ports[cy].max);
+				}
+			} else {
+				if (clickType===1) { // click
+					if (signals[cy][cx] == 0) firstClickVal = 1;
+					else firstClickVal = 0;
+				}
+				
+				signals[cy][cx] = firstClickVal;
+				graf();
+			}             
+		}
+	}   
 }
 
 function graf_move(e) { // servis dogodka onkeydown

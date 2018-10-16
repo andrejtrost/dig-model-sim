@@ -428,7 +428,7 @@ function Op(o, optType) { "use strict";
 		return str+"(0)";
 	}
 	return "resize("+str+","+newsize+")";
- }
+ } 
  
  function numToVector(numObj, size, forceSize, unsigned) {
 	const str = numObj.emitVHD();  // integer number in string
