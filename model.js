@@ -137,6 +137,21 @@ function NumConst(n, fmt) { "use strict";
 		if (logval) {console.log("NumConst "+obj.size+" fmt:"+obj.format);}
 	}
 
+	function set(o) {  // set number type: signed/unsigned and compute size
+		let log ="";
+	
+		if (o.hasOwnProperty("type")) {	
+			if (o.type.hasOwnProperty("unsigned")) {
+				obj.type.unsigned = o.type.unsigned;
+				if (o.type.unsigned) {obj.size = vec.out(value).toString(2).length;}
+				else {obj.size = vec.out(value).toString(2).length+1;}
+				log+=" type:"+typeToString(o.type);
+			}
+		}	
+		
+		if (logset) {console.log("num.set "+log);}
+	}	
+	
 	function val() {return value;}
 		
 	function get() {
@@ -154,7 +169,7 @@ function NumConst(n, fmt) { "use strict";
 	}
 	function count() {return 1;}
 	 
-	return {val, get, visit, emitVHD, count};
+	return {val, get, set, visit, emitVHD, count};
 }
 
 
@@ -179,8 +194,8 @@ function Var(s) { "use strict";
 		value[1] >>>= 0;
 	} else {
 		if (obj.size>32) {console.log("Signed>32 not supported!");}
-		//console.log("S"+(value[0]&(1 <<(obj.size-1))));
-		if ((value[0]&(1 <<(obj.size-1)))!==0) {
+//console.log("set size: "+obj.type.size+"S"+(value[0]&(1 <<(obj.type.size-1))));
+		if ((value[0]&(1 <<(obj.type.size-1)))!==0) {
 			value[0] = value[0] | ~obj.mask[0];
 			value[1] = 0xFFFFFFFF;
 		}
@@ -204,7 +219,8 @@ function Var(s) { "use strict";
 		    Object.assign(obj.mask, vec.mask(obj.type.size));	
 			log+=" size:"+o.type.size;
 		}
-		if (o.type.hasOwnProperty("unsigned")) {obj.type.unsigned = o.type.unsigned; log+=" u:"+o.type.unsigned;}	    
+		if (o.type.hasOwnProperty("unsigned")) {obj.type.unsigned = o.type.unsigned; log+=" u:"+o.type.unsigned;}
+		if (o.type.hasOwnProperty("def")) {obj.type.def = o.type.def; log+=" def";}
 		if (logset) {console.log("Var.set type "+log);}
 	}
 	
@@ -298,7 +314,8 @@ function Op(o, optType) { "use strict";
 	  return vec.unary(obj.op, obj.right.val());
 	}
 	if (isComparisonOp(obj.op)) {
-		return vec.cmp(obj.op, obj.left.val(), obj.right.val());
+//console.log("*** CMP "+typeToString(obj.type));
+		return vec.cmp(obj.op, obj.left.val(), obj.right.val(), obj.type);
 	}
 	if (obj.op===",") {
 		return vec.concat(obj.left.val(), obj.right.val(), type(obj.right).size);
@@ -751,7 +768,7 @@ function Statement(t) {  "use strict";
 		obj.elseBlock = b2;
 	}
 	
-	function val(firstCycle) {
+	function val(firstCycle, numCycle) {
 		let change = false;
 		
 		if (obj.id==="=" || (firstCycle && (obj.id==="<="))) {
@@ -759,6 +776,11 @@ function Statement(t) {  "use strict";
 			if (logval) {
 				console.log("St.val "+obj.target.get().name+" = "+vec.hex(res)+", old:"+vec.hex(obj.target.val()));
 			}
+			// special: cycle 0, do not evaluate seq number assignment (initial reset)
+			if (numCycle===0 && (obj.id==="<=") && type(obj.expr).id==="num") {
+				return false;
+			}
+			
 			return obj.target.setNext(res);  // true, if value changed
 		}
 		if (obj.id==="if") {
@@ -818,7 +840,7 @@ function Statement(t) {  "use strict";
 				
 			} else {  // second pass
 				if (obj.expr.count()===1) {  // single assignment to num => constant
-					if ((type(obj.expr).id==="num") && (hdl(obj.target).assignments===1)
+					if ((type(obj.expr).id==="num") && (hdl(obj.target).assignments===1) && (hdl(obj.target).assignop==="=")
 						&& mode(obj.target)!=="out") {						
 						if (type(obj.target).unsigned && !type(obj.expr).unsigned) { // signed num to unsigned const
 							const mask = vec.mask(type(obj.target).size);
@@ -875,13 +897,13 @@ function Statement(t) {  "use strict";
 
 					let st0 = obj.elseBlock.statements[0];
 					if (st0!==undefined && st0.get().id==="if") {  // else if
-//console.log("Visit ELSE: "+st0.get().expr.visit(1));						
-						let mainLink = obj.elsLink;
-//console.log("Mainlink: "+mainLink);
-						if (mainLink===undefined) {st0.set({elsLink: obj});}
-						else {st0.set({elsLink: mainLink});}
 						
 						if (st0.get().elsif===1) {
+//prestavil v elsif					
+							let mainLink = obj.elsLink;
+							if (mainLink===undefined) {st0.set({elsLink: obj});}
+							else {st0.set({elsLink: mainLink});}
+														
 							obj.els = true; // NOVO
 						}
 					}
@@ -893,7 +915,7 @@ function Statement(t) {  "use strict";
 					let st0 = obj.elseBlock.statements[0];
 					if (st0!==undefined) {
 						const obj=st0.get().elsLink;
-						if (st0.get().id==="if") {
+						if (obj!==undefined && st0.get().id==="if") {
 //console.log("PASS2: IF: "+st0.get().expr.visit(1)+" > "+st0.get().conEqualId+" < "+st0.get().elsLink.conEqualId);
 							if (st0.get().elsLink.conEqualId!==undefined && st0.get().elsLink.conEqualId!=="") {
 								if (st0.get().conEqualId === st0.get().elsLink.conEqualId) {
@@ -1019,8 +1041,8 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 			//str += "\n";
 		} else if (obj.id==="if") {  // if statement, check if belongs to comb
 			let doCase = obj.isCase || (obj.elsLink!==undefined && obj.elsLink.isCase) ? true : false;
-			
-		
+console.log("Model: isCase:"+obj.isCase+" "+(obj.elsLink!==undefined && obj.elsLink.isCase));			
+console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);		
 			if ((obj.combProc && isComb) || (obj.seqProc && !isComb)) {
 				str = "";
 				if (obj.elsif!==1) { // start new conditional statement
@@ -1105,7 +1127,7 @@ function Blok(namestring) {
  
  function visit(pass, vars) {
 //console.log("Block.visit "+pass+" "+obj.name);	 
-    let str = "Blok("+obj.level+"): \n";
+    let str = "Blok("+obj.level+" c:"+obj.combCnt+" s:"+obj.seqCnt+"): \n";
 	statements.forEach(function (st) {
 		stat.setPos(st.get().pos); // save current visit statement position
 		if (pass===1) {
@@ -1125,6 +1147,7 @@ function Blok(namestring) {
 		}
 	});
 	if (log) {console.log("Block: comb="+obj.combCnt+" seq="+obj.seqCnt);}
+	str += "Blok end:"+" c:"+obj.combCnt+" s:"+obj.seqCnt+"): \n";
 	return str;	
  }
 	

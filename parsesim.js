@@ -55,7 +55,7 @@ function Circuit() {
     b = blok;   
  }
  
- function valDelta(firstCycle) { // evaluate delta cycle
+ function valDelta(firstCycle, i) { // evaluate delta cycle
 	let change = false;
 	if (log) {
 		console.log("--- Delta cycle:"+firstCycle);
@@ -66,7 +66,7 @@ function Circuit() {
 	}
 	
 	b.statements.forEach(function(st) {
-		if (st.val(firstCycle)) {
+		if (st.val(firstCycle, i)) {
 			change = true;
 			}
 	});
@@ -88,27 +88,27 @@ function Circuit() {
 	let s = getInValues(i-1);  // read input(i-1)
 	if (s===undefined) {return;}
 	
-	s.forEach(function (val, id) {		
+	s.forEach(function (val, id) {
+		y= vec.parse(val);
+//console.log("GETIN "+id+"="+val+" "+y[1]+","+y[0]);		
 		let v = getVar(id);
 		v.setVal(vec.parse(val));
 	});	 
 	
-	if (i>0) { // first delta is sequential except cycle 0
-		change = valDelta(true);
-		
-		s = getInValues(i);  // read input (i)
-		if (s===undefined) {return;}
-		
-		s.forEach(function (val, id) {		
-			v = getVar(id);
-			v.setVal(vec.parse(val));
-		});	
-	}
+	change = valDelta(true, i);
 	
-	change = valDelta(false); // second delta, combinational
+	s = getInValues(i);  // read input (i)
+	if (s===undefined) {return;}
+	
+	s.forEach(function (val, id) {		
+		v = getVar(id);
+		v.setVal(vec.parse(val));
+	});	
+	
+	change = valDelta(false, i); // second delta, combinational
 	
 	 while (change && iter<MAXITER) {
-		change = valDelta(false);
+		change = valDelta(false, i);
 		iter += 1;
 	 }
 	 
@@ -168,14 +168,8 @@ function Parse(k) {
 				return n;
 			}
 			if (peek().isNum()) { // compute actual value
-			    //let n = Number(consume().id);
-				//let r = vec.op("-", vec.zero, [n, 0]);
-//console.log("Result: "+r);				
-				
+
 				v = new NumConst(t.id+consume().id); // TODO format
-				//n.op(t.id);
-				//n.right(v);
-				//n.set({type: type(v)});
 				n.left(v); 			
 				n.set({type: type(v)});
 				return n;				
@@ -237,8 +231,21 @@ function Parse(k) {
 					sz = sz1 + sz2;
 				}
 			}
-			const u1 = type(f).unsigned;
-			const u2 = type(f2).unsigned;
+			let u1 = type(f).unsigned;
+			let u2 = type(f2).unsigned;
+			
+			if (!u1 && u2) { // signed & unsigned number > signed
+				if (type(f2).id==="num") {
+					f2.set({type: {unsigned: false}});
+					u2 = false;
+				}
+			} else if (u1 && !u2) { // unsigned num & signed > signed num
+				if (type(f).id==="num") {
+					f.set({type: {unsigned: false}});
+					u1 = false;
+				}				
+			}
+			
 			if ((u1 && !u2) || (!u1 && u2)) {
 				throw parseErr("mixs");
 			}			
@@ -255,9 +262,8 @@ function Parse(k) {
 		let x = term(n);
 		let o = "?";
 		if (x === undefined) {return;}
-		//console.log("term type: "+x.getType().size);
 		
-		while (peek().id==="+" || peek().id==="-" || peek().id==="|" || peek().id==="^") { // TODO ,
+		while (peek().id==="+" || peek().id==="-" || peek().id==="|" || peek().id==="^") { 
 			o = consume().id;
 			
 			if (x.getOp()==="") { // set empty or create new operation
@@ -274,17 +280,29 @@ function Parse(k) {
 			let sz = Math.max(type(x).size, type(x2).size);			
 			//console.log("Sum  "+sz);
 			if (o==="+" || o==="-") {sz += 1;}			
-			const u1 = type(x).unsigned;
-			const u2 = type(x2).unsigned;
+			let u1 = type(x).unsigned;
+			let u2 = type(x2).unsigned;
+			if (!u1 && u2) { // signed & unsigned number > signed
+				if (type(x2).id==="num") {
+					x2.set({type: {unsigned: false}});
+					u2 = false;
+				}
+			} else if (u1 && !u2) { // unsigned num & signed > signed num
+				if (type(x).id==="num") {
+					x.set({type: {unsigned: false}});
+					u1 = false;
+				}				
+			}
+			
 			if ((u1 && !u2) || (!u1 && u2)) {
 				throw parseErr("mixs");
 			}
-			x.set({type: {unsigned: u1 && u2, size: sz}});					
-//console.log("Exp "+o+" type: "+(u1&&u2)+" "+sz);		
+			x.set({type: {unsigned: u1 && u2, size: sz}});
 		}
 		
 		let logstr = x.visit(true);   // visit operator for statistics
-		if (log) {console.log(logstr);}  
+		if (log) {console.log(logstr);}
+//console.log("Exp: "+ typeToString(type(x)));		
 		return x;
 	}
 	
@@ -326,6 +344,7 @@ function Parse(k) {
 	{
 		let a = new Statement(op);  // statement, define target, position and level
 		a.setTarget(v);
+		
 		a.set({pos: pos});				
 		a.set({level: Number(circ.getBlok().get().level)});		
 		stat.setPos(pos);
@@ -333,9 +352,27 @@ function Parse(k) {
 		// opnode
 		let node = new Op({op:"", left:null, right:null});		
 		node = exprList(node);
-
+		
 		if (node === undefined) {return;}
 		a.setExpr(node);
+		
+		if (node.count()===1 && type(node).id==="num") {  // single value assigment
+			if (type(node).format[0]==="b") {             // binary format		
+				let t = {...type(v)};  // type: unsigned, size of binary
+				t.unsigned = true;
+				t.size = Number(type(node).format.slice(1));
+				t.def = false;
+				if (type(v).def) {    // redefine default data type (not from ports)
+					v.set({type: t});
+				} else {              // check data type
+				   if (type(v).unsigned===false || type(v).size!==t.size) {
+					   setLog("Warning: "+pos+" binary assignment size difference");
+				   }
+				
+				}
+			}
+			
+		}
 		
 		globPrevStatement="a";
 		return a;
@@ -365,7 +402,8 @@ function Parse(k) {
 				//}
 			
 			} else {
-				e = new Op({op:o, left:e, right:null});
+				const opType={...type(e)};
+				e = new Op({op:o, left:e, right:null}, opType);
 			}			
 							
 			let e2= expression(new Op({op:"", left:null, right:null}));
@@ -379,6 +417,7 @@ function Parse(k) {
 			
 			let sz = Math.max(type(e).size, type(e2).size);
 			let u = type(e).unsigned && type(e2).unsigned;
+console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);			
 			e.set({type: {unsigned: u, size: sz}});
 			
 		} else { // add required operator (value != 0)			
@@ -585,6 +624,7 @@ console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);
 	  	  
 	  let logStr=circ.visit(1); // visit, first pass
 	  
+	  
 	  stat.getSet(Resource.FF).forEach(function(id) {  // calculate number of FFs
 	      stat.incNum(type(circ.getVar(id)).size, Resource.FF);
 	  });
@@ -629,6 +669,9 @@ console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);
 		let sigmode = "";
 		let as = "";
 		console.log(logStr);  // log parsed tree and signals
+		//logStr = circ.visit(2); // ********** še enkrat
+		//console.log(logStr);
+		
 		console.log("Sequential: "+circ.getSeq());
 		console.log("Signals: ");
 		circ.vars.forEach(function(v) {

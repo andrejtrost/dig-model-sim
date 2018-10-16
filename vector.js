@@ -168,7 +168,7 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
   }
   
   function and(a, b) {
-	const o = [a[0], a[1]];
+	const o = [a[0], a[1]];	
     return o.map((o,i) => o & b[i]);
   }
   
@@ -212,11 +212,28 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	} 
   }
   
-  function cmp(op, left, right) {
+  function cmp(op, leftIn, rightIn, type) {
 	  let eq = false;
 	  let gt = false;
 	  let ls = false;
 	  let res = [0,0];
+	  	  
+	  const m = mask(type.size);  // mask inputs before compare
+	  let left = [(leftIn[0] & m[0])>>>0, leftIn[1] & m[1]];
+	  let right = [(rightIn[0] & m[0])>>>0, rightIn[1] & m[1]];
+
+	
+	  if (type.unsigned===false) {  // fix signed
+		if (type.size>32) {console.log("Cmp: signed>32 not supported!");}
+		if ((left[0]&(1 <<(type.size-1)))!==0) {
+			left[0] = left[0] | ~m[0];
+			left[1] = 0xFFFFFFFF;
+		}
+		if ((right[0]&(1 <<(type.size-1)))!==0) {
+			right[0] = right[0] | ~m[0];
+			right[1] = 0xFFFFFFFF;
+		}
+	  }
 	  
 	  if (left[1] === right[1]) {
 		if (left[0] === right[0]) {eq = true;}
@@ -237,7 +254,7 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 		default: res = [0,0];
 	  }
 
-	  if (veclog) {console.log("Vector cmp "+left+" "+op+" "+right+": "+res);}
+	  if (veclog) {console.log("Vector cmp "+left+" "+op+" "+right+": "+res+" size: "+type.size);}
 	  return res;
   }
   

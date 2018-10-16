@@ -21,6 +21,22 @@ function range(sz) {
   return "(<span class='w3-text-deep-orange'>" + (sz-1) + "</span> " + "downto <span class='w3-text-deep-orange'>0</span>)";
 }
 
+function initValue(variable, value) 
+{
+  let str = "";
+  if (type(variable).size === 1) { // single bit constant
+	if (Number(value)%2 === 1) {str += "'1'";}
+	else {str += "'0'";}
+  } else {
+	if (type(variable).unsigned) {
+		str += "to_unsigned("+value+","+type(variable).size+")";
+	} else {
+		str += "to_signed("+value+","+type(variable).size+")";			
+	}
+  }
+  return str;
+}
+
 function VHDLports() {
   if (model===undefined) {return;}
   setLog("VHDL"); 
@@ -71,27 +87,10 @@ function VHDLports() {
 		if (type(val).size>1) {
 		  s += range(type(val).size);
 		}
-		if (hdl(val).mode === "const") {
-			let conv = " := ";
-			if (type(val).size === 1) { // single bit constant
-				if (Number(hdl(val).val)%2 === 1) {conv += "'1'";}
-				else {conv += "'0'";}
-			} else {
-				if (type(val).unsigned) {
-					conv += "to_unsigned("+hdl(val).val+","+type(val).size+")";
-				} else {
-					conv += "to_signed("+hdl(val).val+","+type(val).size+")";			
-				}
-			}
-			s += conv+";\n";
-		} else if (hdl(val).assignop==="<=") {  // initial value for sequential signals
-			s += " := ";
-			if (type(val).unsigned) {
-				s += "to_unsigned(0, "+type(val).size+")";
-			} else {
-				s += "to_signed(0, "+type(val).size+")";
-			}			
-			s += ";\n";
+		if (hdl(val).mode === "const") {			
+			s += " := "+initValue(val, hdl(val).val)+";\n";
+		} else if (hdl(val).assignop==="<=") {	// initial register value		
+			s += " := "+initValue(val, 0)+";\n";
 		} else {		
 			s += ";\n";
 		}
@@ -179,16 +178,18 @@ function searchSeq(b) {
 	let seqProc = false;
 
 	b.statements.forEach(function(st) {
+		  let setIfSeq = false;
 		  if (st.get().id==="if") {
 			let b1 = st.get().ifBlock;
 			let b2 = st.get().elseBlock;
-			if (b1.get().seqCnt > 0) {seqProc = true;}
-			if (searchSeq(b1)) {seqProc = true;}					
+			if (b1.get().seqCnt > 0) {seqProc = true; setIfSeq = true}
+			if (searchSeq(b1)) {seqProc = true; setIfSeq = true}
 			if (b2!== null) {
-				if (b2.get().seqCnt > 0) {seqProc = true;}
-				if (searchSeq(b2)) {seqProc = true;}
-			}			
-			st.set({seqProc: seqProc});  // mark if statement !
+				if (b2.get().seqCnt > 0) {seqProc = true; setIfSeq = true}
+				if (searchSeq(b2)) {seqProc = true; setIfSeq = true}
+			}
+
+			st.set({seqProc: setIfSeq});  // mark if statement !
 		  }
 	  });
 	return seqProc;
