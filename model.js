@@ -43,6 +43,16 @@ function setHdlMode(v, mode) {
 	}
 }
 
+function bitVector(valStr, size) {  //convert number to VHDL binary bit vector
+	const bin = Number(valStr).toString(2);	
+	const numSz = bin.length;
+	
+	if (numSz <= size) {
+		return "\""+bin.padStart(size, '0')+"\"";
+	}		
+	return "\""+bin.slice(-size)+"\""; // Number overflow
+}
+
 let Resource={IO:0, FF:1, BOOL:2, ARIT:3, CMP:4, MUX:5, IOID:6};
 
 function Stat() {    // statistics and tmp values
@@ -159,7 +169,7 @@ function NumConst(n, fmt) { "use strict";
 	}
 	
     function visit() {return value[0].toString();}
-	function emitVHD() {	
+	function emitVHD() {
 		// check for negative value (signed numeric constant)	
 		if (obj.unsigned===false) {
 			let c = vec.complement(value);
@@ -511,7 +521,7 @@ function Op(o, optType) { "use strict";
 		
 			lt = type(obj.left);
 			rt = type(obj.right);
-//console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
+console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
  			if (isComparisonOp(obj.op)) { // handle comparison
 				if ((lt.id==="bit") && (rt.id==="num")) {
 					return obj.left.emitVHD()+" "+op+" '"+obj.right.emitVHD()+"'";
@@ -695,15 +705,19 @@ console.log("Exp: "+exp+"L:"+lt.size+lt.unsigned+" R:"+rt.size+rt.unsigned+" Obj
 								str += exp;
 							}
 
-						} else {							
+						} else {
+console.log("sig-sig L-R:"+lt.size+"-"+rt.size+" obj"+obj.type.size);
+							let tmpSize = lt.size;
 							if (lt.size === rt.size) {  // resize operand ?
 								exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
 							} else if (lt.size < rt.size) {
+								tmpSize = rt.size;
 								exp = resizeVar(obj.left.emitVHD(), rt.size, lt.size)+" "+op+"  "+obj.right.emitVHD();
 							} else {
 								exp += obj.left.emitVHD()+" "+op+" "+resizeVar(obj.right.emitVHD(), lt.size, rt.size);
 							}
-							if (lt.size === obj.type.size) { 
+							
+							if (tmpSize === obj.type.size) { 
 								str += exp;
 							} else {
 								str += resizeVar(exp, obj.type.size, 2);
@@ -835,7 +849,7 @@ function Statement(t) {  "use strict";
 				
 				if (type(obj.target).size !== type(obj.expr).size) {  // NOTE: Resize assignment, correct expr op
 					if (log) {console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(obj.expr).size);}
-					obj.expr.set({type: {size: type(obj.target).size}});
+					obj.expr.set({type: {size: type(obj.target).size}}); //%%%%%%%%%%%%%%%%%%%%%%%%
 				}
 				
 			} else {  // second pass
@@ -1047,12 +1061,16 @@ console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);
 				str = "";
 				if (obj.elsif!==1) { // start new conditional statement
 					if (obj.els && obj.isCase) { 
-						str += spaces + "case "+obj.expr.getLeft().emitVHD()+" is\n"; 
-						str += spaces + " when "+obj.expr.getRight().emitVHD()+" =>\n";
+						str += spaces + "case "+obj.expr.getLeft().emitVHD()+" is\n";
+						const bitSize = type(obj.expr.getLeft()).size;						
+						let bv = bitVector(obj.expr.getRight().emitVHD(), bitSize);						
+						str += spaces + " when "+bv+" =>\n";
 					} else { str += spaces + "if "+obj.expr.emitVHD()+" then\n"; }
 				} else {            // continue conditional (elsif or when)					
-					if (doCase) { 
-						str += " when "+obj.expr.getRight().emitVHD()+" =>\n";
+					if (doCase) {
+						const bitSize = type(obj.expr.getLeft()).size;						
+						let bv = bitVector(obj.expr.getRight().emitVHD(), bitSize);						
+						str += " when "+bv+" =>\n";
 					} else {
 						str += "if "+obj.expr.emitVHD()+" then\n";
 					}

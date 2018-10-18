@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const version = "parse v1.2 var2";
+const version = "V.17";
 const textID = "vhdl";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -191,7 +191,7 @@ function Parse(k) {
 		}
 		else if (t.id === "(") { // braces with new expression
 			consume();
-			let e = expression(n);
+			let e = boolop(n); //expression(n); //************NEW
 			if (peek().id===")") { consume(); }
 			else { 
 			  throw parseErr("exp",")"); // Expected ) 
@@ -440,11 +440,11 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 		return e;
 	}
 	
-	function boolop(n) {
+	function booland(n) {
 		let c = comparison(n);
 		
-		while (peek().id==="&&" || peek().id==="||") { 
-		    console.log("AND-OR");
+		while (peek().id==="&&") { 
+		    console.log("AND");
 			let o = consume().id;
 			
 			if (c.getOp()==="") { 
@@ -454,6 +454,30 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 			}
 			
 			let c2 = comparison(new Op({op:"", left:null, right:null}));
+			c.right(c2);
+			
+			let sz = Math.max(type(c).size, type(c2).size);
+			let u = type(c).unsigned && type(c2).unsigned;
+			c.set({type: {unsigned: u, size: sz}});	
+		}	
+		
+		return c;
+	}
+	
+	function boolop(n) {
+		let c = booland(n);
+		
+		while (peek().id==="||") { 
+		    console.log("OR");
+			let o = consume().id;
+			
+			if (c.getOp()==="") { 
+				c.op(o);				
+			} else {
+				c = new Op({op:o, left:c, right:null});
+			}
+			
+			let c2 = booland(new Op({op:"", left:null, right:null}));
 			c.right(c2);
 			
 			let sz = Math.max(type(c).size, type(c2).size);

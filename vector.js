@@ -221,29 +221,28 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	  const m = mask(type.size);  // mask inputs before compare
 	  let left = [(leftIn[0] & m[0])>>>0, leftIn[1] & m[1]];
 	  let right = [(rightIn[0] & m[0])>>>0, rightIn[1] & m[1]];
-
 	
-	  if (type.unsigned===false) {  // fix signed
+	  if (type.unsigned===false) {  // signed comparision, extend sign to 32 bits
 		if (type.size>32) {console.log("Cmp: signed>32 not supported!");}
-		if ((left[0]&(1 <<(type.size-1)))!==0) {
-			left[0] = left[0] | ~m[0];
-			left[1] = 0xFFFFFFFF;
-		}
-		if ((right[0]&(1 <<(type.size-1)))!==0) {
-			right[0] = right[0] | ~m[0];
-			right[1] = 0xFFFFFFFF;
-		}
+		let l = left[0];
+		if ((left[0]&(1 <<(type.size-1)))!==0) {l = left[0] | ~m[0];}
+		let r = right[0];
+		if ((right[0]&(1 <<(type.size-1)))!==0) {r = right[0] | ~m[0];}
+		
+		eq = (l==r); // compare 32 bit numbers and set cmp flags
+		gt = (l>r);
+		ls = (l<r);
+		
+	  } else { // unsigned, set cmp flags for 32+32 bits
+		  if (left[1] === right[1]) {
+			if (left[0] === right[0]) {eq = true;}
+			else if (left[0] > right[0]) {gt = true;}
+			else {ls = true;}
+		  } else {
+			if (left[1] > right[1]) {gt = true;}
+			else {ls = true;}
+		  }
 	  }
-	  
-	  if (left[1] === right[1]) {
-		if (left[0] === right[0]) {eq = true;}
-		else if (left[0] > right[0]) {gt = true;}  // unsigned
-		else {ls = true;}
-	  } else {
-		if (left[1] > right[1]) {gt = true;}
-		else {ls = true;}
-	  }
-	  
 	  switch (op) {
 		case "==": res = eq ? [1,0]:[0,0]; break;
 		case "!=": res = !eq ? [1,0]:[0,0]; break;
@@ -253,7 +252,6 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 		case "<=": res = ls|eq ? [1,0]:[0,0]; break;
 		default: res = [0,0];
 	  }
-
 	  if (veclog) {console.log("Vector cmp "+left+" "+op+" "+right+": "+res+" size: "+type.size);}
 	  return res;
   }
