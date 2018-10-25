@@ -139,6 +139,9 @@ function Lexer(txt) {
 					if (peekCh()==="=") {
 						look = new Token("<=", "=", pos);
 						getCh(); getCh();
+					} else if (peekCh()==="<") {
+						look = new Token("<<", "<<", pos);
+						getCh(); getCh();
 					} else {
 						look = new Token("<", "co", pos);
 						getCh();
@@ -146,6 +149,9 @@ function Lexer(txt) {
 				} else if (nextCh===">") {
 					if (peekCh()==="=") {
 						look = new Token(">=", "co", pos);
+						getCh(); getCh();
+					} else if (peekCh()===">") {
+						look = new Token(">>", ">>", pos);
 						getCh(); getCh();
 					} else {
 						look = new Token(">", "co", pos);

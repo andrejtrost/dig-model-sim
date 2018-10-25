@@ -48,6 +48,8 @@ function errTxt(str, id) {  // compose error log text, use global english
 		// parse errors
 		case "exp": s = (english) ? "Expecting '"+id+"'!" : "Pričakujem '"+id+"'!"; break;
 		case "expvn": s = (english) ? "Expected signal or number!" : "Pričakujem signal ali število!"; break;
+		case "explit": s = (english) ? "Expected numeric literal!" : "Pričakujem številsko vrednost!"; break;
+		case "sizeov": s = (english) ? "Operation size overflow (1-64)!" : "Napačna velikost operacije (1-64)!"; break;
 		case "tin": s = (english) ? "Assignment to input signal '"+id+"'!" : "Prireditev vhodnemu signalu '"+id+"'!"; break;
 		case "unexp": s = (english) ? "Unexpected token '"+id+"'!" : "Nepričakovan simbol '"+id+"'!"; break;
 		case "mixs": s = (english) ? "Illegal usage of Signed and Unsigned in expression!" : 
@@ -133,7 +135,7 @@ function getDefaultType() {  // oldgetType -> getDefaultType
 	let unsigned= document.getElementById("type").value==="u" ? true : false;
 	let size = parseInt(document.getElementById("width").value);
 	if (size===1) {return {id:"bit", unsigned:unsigned, size:size};}
-	else {return {id:"sig", unsigned:unsigned, size:size};}
+	else {return {id:"sig", unsigned:unsigned, size:size, def:true};}
 	//return document.getElementById("type").value+document.getElementById("width").value;
 }
 

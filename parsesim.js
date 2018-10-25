@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const version = "V.17";
+const version = "V.17a";
 const textID = "vhdl";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -155,28 +155,10 @@ function Parse(k) {
 		return "<span style='color: red;'>"+er+"</span>"+er1+peek().pos()+": "+errTxt(str, id);
 	} 	
 	
-	function factor(n) { // expression factor (id, num ())
+	function primary(n) { // primary :== name | literal | ( expression )
 		let t=peek();
 		
-		if (t.id==="-" || t.id==="~") { // unary operator
-			consume();
-			if (peek().isID()) {				
-				let v = circ.getVar(consume().id);
-				n.op(t.id);
-				n.right(v);				
-				n.set({type: type(v)});				
-				return n;
-			}
-			if (peek().isNum()) { // compute actual value
-
-				v = new NumConst(t.id+consume().id); // TODO format
-				n.left(v); 			
-				n.set({type: type(v)});
-				return n;				
-			}
-			throw parseErr("expvn"); //Expected variable identifier or number
-		}
-		else if (t.isID()) { // identifier, save variable & set op type
+		if (t.isID()) { // identifier, save variable & set op type
 			let v = circ.getVar(consume().id); 
 			n.left(v);
 			n.set({type: type(v)});
@@ -191,7 +173,7 @@ function Parse(k) {
 		}
 		else if (t.id === "(") { // braces with new expression
 			consume();
-			let e = boolop(n); //expression(n); //************NEW
+			let e = expression(n); 
 			if (peek().id===")") { consume(); }
 			else { 
 			  throw parseErr("exp",")"); // Expected ) 
@@ -202,12 +184,32 @@ function Parse(k) {
 		}
 	}
 	
+	function factor(x) { // factor :== primary | - primary | NOT primary
+		let t=peek();		
+		
+		if (t.id==="-" || t.id==="~") { // unary operator
+			let o = consume().id;
+			// set empty or create new Op
+			if (x.getOp()==="") {x.op(o);} 
+			else {x = new Op({op:o, left:x, right:null});}			
+			
+			let x2 = primary(new Op({op:"", left:null, right:null}));
+			x.right(x2);
+			let u2 = type(x2).unsigned
+			let sz = type(x2).size;
+			x.set({type: {unsigned: u2, size: sz}});
+		} else {
+			x = primary(x);
+		}
+			
+		return x;
+	}
 	
-	function term(n) {  // expression term 
+	function term(n) {  // term :== factor {* factor}
 		let f = factor(n);
 		if (f === undefined) {return;}
 						
-		while (peek().id==="*" || peek().id==="&") {
+		while (peek().id==="*") {
 			let o = consume().id;
 			
 			if (f.getOp()==="") { // set empty or create new
@@ -222,15 +224,13 @@ function Parse(k) {
 			
 			const sz1 = type(f).size;
 			const sz2 = type(f2).size;
-			let sz = Math.max(sz1, sz2);
-			if (o==="*") {
-				if (sz1===1 && sz2===1) { 
-					f.op("&");
-					sz = 1; 
-				} else { 
-					sz = sz1 + sz2;
-				}
+			let sz = sz1 + sz2;  // product size
+
+			if (sz1===1 && sz2===1) { // for 1 bit change to AND
+				f.op("&");
+				sz = 1; 
 			}
+			
 			let u1 = type(f).unsigned;
 			let u2 = type(f2).unsigned;
 			
@@ -254,16 +254,138 @@ function Parse(k) {
 			console.log("Term type: "+(u1 && u2)+" "+sz);			
 		}
 		
-		return f; //y
+		return f;
+	}
+
+	function shift(n) {  // shift :== term {+,- term}
+		let x = term(n);
+		if (x === undefined) {return;}
+						
+		while (peek().id==="+" || peek().id==="-" || peek().id===",") {
+			let o = consume().id;
+			// set empty or create new Op
+			if (x.getOp()==="") {x.op(o);} 
+			else {x = new Op({op:o, left:x, right:null});}			
+				
+			// second relation
+			let x2 = term(new Op({op:"", left:null, right:null})); 
+			x.right(x2);
+			
+			const sz1 = type(x).size;
+			const sz2 = type(x2).size;
+			let sz = Math.max(sz1, sz2)+1;  // allow carry
+			if (o===",") {sz = sz1+sz2;}
+			
+			let u1 = type(x).unsigned;
+			let u2 = type(x2).unsigned;
+			
+			if (!u1 && u2) { // signed & unsigned number > signed
+				if (type(x2).id==="num") {
+					x2.set({type: {unsigned: false}});
+					u2 = false;
+				}
+			} else if (u1 && !u2) { // unsigned num & signed > signed num
+				if (type(x).id==="num") {
+					x.set({type: {unsigned: false}});
+					u1 = false;
+				}				
+			}
+			
+			if ((u1 && !u2) || (!u1 && u2)) {throw parseErr("mixs");}			
+			
+			x.set({type: {unsigned: u1 && u2, size: sz}});		
+//console.log("relation type: "+(u1 && u2)+" "+sz);
+		}
+		
+		return x;
+	}	
+	
+	function relationAND(n) {  // relation :== shift [<<, >> literal]
+		let x = shift(n);
+		if (x === undefined) {return;}
+						
+		if (peek().id==="<<") {  // currently only <<
+			let o = consume().id;
+				
+			// second operand (fixed number)
+			let t=peek();
+			
+			if (t.isNum()) { // number
+				let token = consume();
+				let num = Number(token.id); //new NumConst(token.id, token.format()); 
+				
+				const sz = type(x).size;
+				
+				if (num<1 || num+sz>64) {throw parseErr("sizeov");} //Size overflow
+				
+				console.log("<< "+num); //OK, <<, concat with padding zeros
+				
+				let pad = new NumConst("0", "b"+num);
+				x.right(pad);
+				
+				if (x.getOp()==="") {x.op(",");} 
+				else {x = new Op({op:"'", left:x, right:null});}
+												
+				let u1 = type(x).unsigned;			
+				x.set({type: {unsigned: u1, size: (sz+num)}});
+			
+				
+			} else {
+				throw parseErr("explit"); //Expected numeric literal
+			}
+		}
+		
+		return x;
+	}
+	
+	function relation(n) {  // relation :== relationAND { AND relationAND }
+		let x = relationAND(n);
+		if (x === undefined) {return;}
+						
+		while (peek().id==="&") {
+			let o = consume().id;
+			// set empty or create new Op
+			if (x.getOp()==="") {x.op(o);} 
+			else {x = new Op({op:o, left:x, right:null});}			
+				
+			// second relation
+			let x2 = relationAND(new Op({op:"", left:null, right:null})); 
+			x.right(x2);
+			
+			const sz1 = type(x).size;
+			const sz2 = type(x2).size;
+			let sz = Math.max(sz1, sz2);			
+			let u1 = type(x).unsigned;
+			let u2 = type(x2).unsigned;
+			
+			if (!u1 && u2) { // signed & unsigned number > signed
+				if (type(x2).id==="num") {
+					x2.set({type: {unsigned: false}});
+					u2 = false;
+				}
+			} else if (u1 && !u2) { // unsigned num & signed > signed num
+				if (type(x).id==="num") {
+					x.set({type: {unsigned: false}});
+					u1 = false;
+				}				
+			}
+			
+			if ((u1 && !u2) || (!u1 && u2)) {throw parseErr("mixs");}			
+			
+			x.set({type: {unsigned: u1 && u2, size: sz}});		
+//console.log("relationA type: "+(u1 && u2)+" "+sz);
+		}
+		
+		return x;
 	}
 	
 	
-	function expression(n) {
-		let x = term(n);
+	function expression(n) {  // expression :== relation { OR,XOR relation}
+		let x = relation(n);
 		let o = "?";
 		if (x === undefined) {return;}
 		
-		while (peek().id==="+" || peek().id==="-" || peek().id==="|" || peek().id==="^") { 
+		while (peek().id==="|" || peek().id==="^") { 
 			o = consume().id;
 			
 			if (x.getOp()==="") { // set empty or create new operation
@@ -273,13 +395,12 @@ function Parse(k) {
 				x = new Op({op:o, left:x, right:null}, opType); // type(x)
 			}
 			
-			// second term
-			let x2 = term(new Op({op:"", left:null, right:null}));
+			// second relationA
+			let x2 = relation(new Op({op:"", left:null, right:null}));
 			x.right(x2);
 						
 			let sz = Math.max(type(x).size, type(x2).size);			
-			//console.log("Sum  "+sz);
-			if (o==="+" || o==="-") {sz += 1;}			
+			
 			let u1 = type(x).unsigned;
 			let u2 = type(x2).unsigned;
 			if (!u1 && u2) { // signed & unsigned number > signed
