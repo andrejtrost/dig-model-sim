@@ -55,9 +55,12 @@ function errTxt(str, id) {  // compose error log text, use global english
 		case "mixs": s = (english) ? "Illegal usage of Signed and Unsigned in expression!" : 
 		                             "Neveljavna uporaba Signed in Unsigned v izrazu!"; break;
 		case "limit": s = (english) ? "Concatenation size > 64 bits!" : "Sestavljen signal > 64 bitov!"; break;
+		case "unsh": s = (english) ? "Shift right unsupported in this expression!" : "Pomik desno ni podprt v tem izrazu!"; break;
 		// simulator errors
 		case "inf": s = (english) ? "Simulation infinite loop!" : "Simulacija v neskončni zanki!"; break;
 		// input errors
+		case "rsv": s = (english) ? "Illegal use of reserved word '"+id+"'!" : "Napačna raba rezervirane besede '"+id+"'!"; break;
+		case "mixc": s = (english) ? "Illegal use of mixed case in signal name '"+id+"'!" : "Napačna raba velikih in malih črk v imenu signala '"+id+"'!"; break;
 		case "mode": s = (english) ? "Unknown Mode for port '"+id+"'!" : "Neznan Mode priključka '"+id+"'!"; break;
 		case "type": s = (english) ? "Illegal Type of signal '"+id+"'!" : "Napačna oznaka tipa signala '"+id+"'!"; break;
 		case "size": s = (english) ? "Illegal size of signal '"+id+"' (1-64)!" : "Napačna velikost signala '"+id+"' (1-64)!"; break;

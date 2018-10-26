@@ -64,7 +64,8 @@ function Stat() {    // statistics and tmp values
 	let numMux = 0;
 	let io = new Set([]); // I/O variables
 	let ff = new Set([]);
-	let item = [];        // temporary save variable identifiers
+	//let item = [];        temporary save variable identifiers 2610
+	let names = new Set([]); // set of variable names
 	let pos = {x:0, y:0}; // model visit position
 	
 	function init() {
@@ -78,16 +79,20 @@ function Stat() {    // statistics and tmp values
 		ff = new Set([]);
 	}
 	
-	function initItem() { item = []; }	
-	function pushItem(o) { item.push(o); }
-	function getItem() { return item;}
+	function initNames() {names = new Set([]);}
+	function addName(o) {names.add(o);}
+	function getNames(o) {return names;}
+	
+	//function initItem() { item = []; }	
+	//function pushItem(o) { item.push(o); }
+	//function getItem() { return item;}
 	
 	function setPos(p) { pos = p; }
 	function getPos() { return pos;}
 	
 	function addID(id, set) { // add identifier to set
-		if (set===Resource.IO) {io.add(id)};
-		if (set===Resource.FF) {ff.add(id)};
+		if (set===Resource.IO) {io.add(id);}
+		if (set===Resource.FF) {ff.add(id);}
 	}
 	function getSet(set) { // get seleceted Set()
 		if (set===Resource.IO) {return io;}
@@ -115,7 +120,7 @@ function Stat() {    // statistics and tmp values
 		return s;
 	}
 	
-	return {init, initItem, pushItem, getItem, setPos, getPos, addID, getSet, incNum, emit};
+	return {init, initNames, addName, getNames, setPos, getPos, addID, getSet, incNum, emit};
 }
 
 stat = new Stat(); // global status object, resource statistics and global tmp values
@@ -182,6 +187,44 @@ function NumConst(n, fmt) { "use strict";
 	return {val, get, set, visit, emitVHD, count};
 }
 
+function Slice(v, h, l) {
+	let variable = v;
+	let high = Number(h);
+	let low = Number(l);
+	let size = high-low+1;
+	
+	function val() {return variable.get();} // todo
+		
+	function get() { // pass the variable info
+		let v = variable.get();
+		let type = Object.assign({}, v.type);
+		let hdl = Object.assign({}, v.hdl);
+		
+		type.size = size;
+		const o = {isVar:true, name:v.name, mode:v.mode, type:type, hdl:hdl}
+		return o;
+	}
+	
+	function set(o) {  // apply set to the variable, except size	
+		variable.set(o);
+	}
+	
+	function visit() {
+		stat.addName(variable.get().name);
+		if (high===low) {return variable.get().name+"("+high+")";}
+		
+		return variable.get().name+"("+high+":"+low+")";
+	}
+	
+	function emitVHD() {
+		if (high===low) {return variable.get().name+"("+high+")";}
+		return variable.get().name+"("+high+" downto "+low+")";
+	}
+	
+	function count() {return 1;}
+	
+	return {val, get, set, visit, emitVHD, count};
+}
 
 function Var(s) { "use strict";
  let obj = {isVar:true, name:s, mode:"", type:{id:"sig", unsigned:true, size:0}, mask:[0, 0], hdl:{}}; // target:"" or "=" numtarget:0, 1, 
@@ -239,6 +282,9 @@ function Var(s) { "use strict";
 		if (o.hdl.hasOwnProperty("assignments")) {obj.hdl.assignments = o.hdl.assignments; log+=" a:"+o.hdl.assignments;}
 		if (o.hdl.hasOwnProperty("assignop")) {obj.hdl.assignop = o.hdl.assignop; log+=" op"+o.hdl.assignop;}
 		if (o.hdl.hasOwnProperty("val")) {obj.hdl.val = o.hdl.val; log+=" v="+o.hdl.val;}
+		
+		if (o.hdl.hasOwnProperty("names")) {obj.hdl.names = o.hdl.names; log+=" names="+o.hdl.names.size;}
+		
 		if (logset) {console.log("Var.set hdl "+log);}
 	}
  }
@@ -278,7 +324,7 @@ function Var(s) { "use strict";
  }
  
  function visit() {
-	 stat.pushItem(obj.name);
+	 stat.addName(obj.name);
 	 return obj.name;
  }
  function emitVHD() {return obj.name;}
@@ -840,11 +886,19 @@ function Statement(t) {  "use strict";
 				
 				if (obj.expr === null) {str+="?";} 
 				else {				
-					stat.initItem();
+					stat.initNames();
 					str += obj.expr.visit();  // visit expression, count operands, set var mode = in				
-					for (const id of stat.getItem()) {
-						setHdlMode(vars.get(id), "in");
+
+					let nameSet = new Set([]);
+					if (obj.target.get().hdl.hasOwnProperty("names")) { // get existing names
+						nameSet = obj.target.get().hdl.names;
 					}
+					for (const id of stat.getNames()) {
+						setHdlMode(vars.get(id), "in"); // set HDL to IN
+						nameSet.add(id);                // add ID to current name set						
+					}
+					
+					obj.target.set({hdl: {names: nameSet}}); // add set of names to target
 				}
 				
 				if (type(obj.target).size !== type(obj.expr).size) {  // NOTE: Resize assignment, correct expr op
@@ -894,9 +948,9 @@ function Statement(t) {  "use strict";
 		} else if (obj.id==="if") {
 			if (pass===1) {
 				str += "<"+obj.elsif+">";
-				stat.initItem();
+				stat.initNames();
 				str += obj.expr.visit()+"\n";
-				for (const id of stat.getItem()) {
+				for (const id of stat.getNames()) {
 					setHdlMode(vars.get(id), "in");
 				}
 				
@@ -1075,10 +1129,8 @@ console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);
 						str += "if "+obj.expr.emitVHD()+" then\n";
 					}
 				}
-								
-				//if (obj.elsif!==1) { str += spaces; } // no leading spaces for elsif 
-				//str += "if "+obj.expr.emitVHD()+" then\n";
-				
+
+				// emit statements inside IF BLOCK
 				let ifBodyStr="";
 				obj.ifBlock.statements.forEach(function (st) {
 					ifBodyStr += st.emitVHD(indent, isComb);
@@ -1087,23 +1139,28 @@ console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);
 				if (ifBodyStr==="") {str += spaces+"   null;\n";} // null statement
 				else { str += ifBodyStr; }
 				
-				if (obj.elseBlock!==null) { // transform else block
+				// TODO: check if else block exists and is required to emit
+				
+				if (obj.elseBlock!==null) { // transform else block								
+					let elseKey="";
 					let elseStr="";
 
 					if (obj.els) { 
-						if (doCase) { str += spaces; } // ...+when
-						else { str += spaces+"els"; }  // ...+els+if
+						if (doCase) { elseKey += spaces; } // ...+when
+						else { elseKey += spaces+"els"; }  // ...+els+if
 					} else {
-						if (doCase && obj.elsif===1 && !obj.els) { str+=spaces+" when others =>\n"; }
-						else {str += spaces+"else\n"; }
+						if (doCase && obj.elsif===1 && !obj.els) { elseKey+=spaces+" when others =>\n"; }
+						else {elseKey += spaces+"else\n"; }
 					}
 					
 					obj.elseBlock.statements.forEach(function(st) {
 						elseStr += st.emitVHD(indent,  isComb);
-					});	
-					str += elseStr;
+					});
+					
+					// emit else only if not empty!
+					if (elseStr!=="") {str += elseKey + elseStr;}
 							
-					if (elseStr==="") {str += spaces+"   null;\n";} // null statement					
+					//if (elseStr==="") {str += spaces+"   null;\n";} // null statement					
 				}
 
 				if (obj.elsif!==1) { // end if (case)

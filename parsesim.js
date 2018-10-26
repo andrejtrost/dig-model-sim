@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const version = "V.17a";
+const version = "V.18a";
 const textID = "vhdl";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -23,10 +23,27 @@ function Circuit() {
 	const er = (english) ? "Runtime Error: " : "Napaka izvajanja: ";
 	return "<span style='color: red;'>"+er+"</span>"+errTxt(str);
  } 
+
+ function idErr(str, id) {
+	const er = (english) ? "Error: " : "Napaka: ";
+	return "<span style='color: red;'>"+er+"</span>"+errTxt(str, id);
+ } 
  
- function getVar(id) {  // get or create new Var 
-//console.log("Cir.getVar "+id);
-	 if (!vars.has(id)) {			
+ const VHDLkey=["abs","configuration","impure","null","rem","type","access","constant","in","of","report","unaffected","after","disconnect","inertial","on","return","units","alias","downto","inout","open","rol","until","all","else","is","or","ror","use","and","elsif","label","others","select","variable","architecture","end","library","out","severity","wait","array","entity","linkage","package","signal","when","assert","exit","literal","port","shared","while","attribute","file","loop","postponed","sla","with","begin","for","map","procedure","sll","xnor","block","function","mod","process","sra","xor","body","generate","nand","pure","srl","buffer","generic","new","range","subtype","bus","group","next","record","then","case","guarded","nor","register","to","component","if","not","reject","transport"]; 
+ 
+ function getVar(id, returnNull) {  // get or create new, if not returnNull
+     //console.log("Cir.getVar "+id);
+	 const sId = id.toLowerCase();
+	 
+	 if (!vars.has(id)) {
+		if (returnNull) {return null;}  // if not found, return null
+		if (VHDLkey.indexOf(sId)>=0) { throw idErr("rsv",id); } // is VHDL keyword?
+	
+        // check if exists the same name with different case	 
+	    var ids = Array.from( vars.keys() ).map(v => v.toLowerCase());	
+		// exists if compare small letters, mixed case error
+		if (ids.indexOf(sId)>=0) { throw idErr("mixc",id); } 
+		
 		let v = new Var(id);		
 		if (ports.has(id)) { // get type & mode from ports
 			v.set({type: ports.get(id).type});
@@ -304,7 +321,7 @@ function Parse(k) {
 		let x = shift(n);
 		if (x === undefined) {return;}
 						
-		if (peek().id==="<<") {  // currently only <<
+		if (peek().id==="<<" || peek().id===">>") {  // currently only <<
 			let o = consume().id;
 				
 			// second operand (fixed number)
@@ -316,19 +333,34 @@ function Parse(k) {
 				
 				const sz = type(x).size;
 				
-				if (num<1 || num+sz>64) {throw parseErr("sizeov");} //Size overflow
+				if (o==="<<") {
+					if (num<1 || num+sz>64) {throw parseErr("sizeov");} //Size overflow
+					
+					console.log("<< "+num); //OK, <<, concat with padding zeros
+					
+					let pad = new NumConst("0", "b"+num);
+										
+					if (x.getOp()==="") {x.op(",");} 
+					else {x = new Op({op:",", left:x, right:null});}
+					x.right(pad);
+					
+					let u1 = type(x).unsigned;			
+					x.set({type: {unsigned: u1, size: (sz+num)}});
+				} else { // >>
 				
-				console.log("<< "+num); //OK, <<, concat with padding zeros
-				
-				let pad = new NumConst("0", "b"+num);
-				x.right(pad);
-				
-				if (x.getOp()==="") {x.op(",");} 
-				else {x = new Op({op:"'", left:x, right:null});}
-												
-				let u1 = type(x).unsigned;			
-				x.set({type: {unsigned: u1, size: (sz+num)}});
-			
+					if (x.getOp()==="") {
+						let v = x.getLeft();						
+						if (v.get().isVar) {
+							const n = type(v).size-1;
+							if (n-num<0) {throw parseErr("sizeov");} //Size underflow
+														
+							let slice = new Slice(v,n,num);
+							x.left(slice);							
+							x.set({type: slice.get().type});  // reset the Op size
+						}	
+					} else {throw parseErr("unsh");}
+
+				}
 				
 			} else {
 				throw parseErr("explit"); //Expected numeric literal
@@ -769,6 +801,21 @@ console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);
 	  	  
 	  let logStr=circ.visit(1); // visit, first pass
 	  
+	  let targetList = [];
+	  
+console.log("=====================");	  
+	  circ.vars.forEach(function (val, id) {
+		  if (hdl(val).names!==undefined) {
+			  
+console.log("**"+id+" "+hdl(val).mode+" names: "+hdl(val).names.size);			
+		  }
+			/*if (hdl(val).mode==="out") { // get a list of target signals
+				targetList.push(id);
+console.log("****************");				
+			}*/
+	  });
+	  
+	  setLog("Targets: "+targetList);
 	  
 	  stat.getSet(Resource.FF).forEach(function(id) {  // calculate number of FFs
 	      stat.incNum(type(circ.getVar(id)).size, Resource.FF);
@@ -777,10 +824,12 @@ console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);
 	  // check ports usage, note: in used as out checked at assignment visit,
 	  //   out used as inout solved at 2nd pass visit
 	  circ.ports.forEach(function (val, id) { 
-		var v = circ.getVar(id);
-		var mod = mode(v);
-		if (mod==="out" && hdl(v).mode==="in") {  // wrong declaration or usage
-		    throw modelErr("vin", id); // Signal should be declared as input
+		var v = circ.getVar(id, true);
+		if (v!==null) {
+			var mod = mode(v);			
+			if (mod==="out" && hdl(v).mode==="in") {  // wrong declaration or usage
+				throw modelErr("vin", id); // Signal should be declared as input
+			}
 		}
 	  });
 	  
