@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const version = "V.18a";
+const version = "V.19";
 const textID = "vhdl";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -13,7 +13,7 @@ let vec=new Vector();
 //let model = undefined;
 
 function Circuit() {
- let b = new Blok("new");
+ let b = new Blok("1");
  let vars = new Map(); 
  let ports = getPorts();
  let sequential = false;
@@ -212,7 +212,7 @@ function Parse(k) {
 			
 			let x2 = primary(new Op({op:"", left:null, right:null}));
 			x.right(x2);
-			let u2 = type(x2).unsigned
+			let u2 = type(x2).unsigned;
 			let sz = type(x2).size;
 			x.set({type: {unsigned: u2, size: sz}});
 		} else {
@@ -655,13 +655,16 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	
 	function parseIf(pos, oneStatement) //******** IF ***********
 	{		
-console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);	
+//console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);	
 		let ifst = new Statement("if");
 		ifst.set({level: Number(circ.getBlok().get().level)});
 		ifst.set({pos: pos});
 		stat.setPos(pos);
 		
-		let ifblok = new Blok("if");		
+		stat.pushBlock();		
+	
+		const ifBlockName = stat.blockName();
+		let ifblok = new Blok(ifBlockName);		
 		let elseBlok = null;
 		
 		takeToken("(");		
@@ -697,7 +700,7 @@ console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);
 		skipSeparators();		
 		if (peek().id==="else") {
 			consume();
-			elseBlok = new Blok("else");
+			elseBlok = new Blok(ifBlockName+"e");
 
             globPrevStatement="else";
 			if (elsif) {
@@ -716,7 +719,8 @@ console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);
 		
 		ifst.setIf(ifblok, elseBlok);
 		circ.setBlok(saveBlok);
-				
+		stat.popBlock();
+		
 		return ifst;
 	}	
 	
@@ -801,21 +805,46 @@ console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);
 	  	  
 	  let logStr=circ.visit(1); // visit, first pass
 	  
-	  let targetList = [];
-	  
-console.log("=====================");	  
+	  let numUndeclared;
+	  let v;
+	  let mod;
+	  let foundUndeclared = false; // find only one set of undeclared variables
+  
 	  circ.vars.forEach(function (val, id) {
-		  if (hdl(val).names!==undefined) {
-			  
-console.log("**"+id+" "+hdl(val).mode+" names: "+hdl(val).names.size);			
+		  numUndeclared=0;
+		  let nameList = [];
+		  if (!foundUndeclared && hdl(val).names!==undefined) {
+			// count undeclared used as inputs
+			hdl(val).names.forEach(function (varName) {
+				v = circ.getVar(varName, true);
+				if (v!==null) {					
+					mod = mode(v);			
+					if (mod==="" && hdl(v).mode==="in") {
+						numUndeclared += 1;
+						nameList.push(varName);
+					}	
+				}
+			});
+			if (numUndeclared>=2) { // two or more undeclared convert to enum!!
+				foundUndeclared = true;
+				nameList.sort();
+				setLog("Enumerating variables: "+nameList);
+				let enumVal = 0;
+				nameList.forEach(function (varName) {
+					v = circ.getVar(varName, true);
+					v.set({hdl: {mode: "const"}});
+					v.set({hdl: {val: enumVal}});
+					v.setVal(vec.parse(enumVal));
+					
+					enumVal += 1;
+				});
+			}
+//console.log("**"+id+" "+hdl(val).mode+" names: "+hdl(val).names.size);			
 		  }
-			/*if (hdl(val).mode==="out") { // get a list of target signals
-				targetList.push(id);
-console.log("****************");				
-			}*/
+			
 	  });
 	  
-	  setLog("Targets: "+targetList);
+	  
 	  
 	  stat.getSet(Resource.FF).forEach(function(id) {  // calculate number of FFs
 	      stat.incNum(type(circ.getVar(id)).size, Resource.FF);
@@ -824,14 +853,16 @@ console.log("****************");
 	  // check ports usage, note: in used as out checked at assignment visit,
 	  //   out used as inout solved at 2nd pass visit
 	  circ.ports.forEach(function (val, id) { 
-		var v = circ.getVar(id, true);
+		v = circ.getVar(id, true);
 		if (v!==null) {
-			var mod = mode(v);			
+			mod = mode(v);			
 			if (mod==="out" && hdl(v).mode==="in") {  // wrong declaration or usage
 				throw modelErr("vin", id); // Signal should be declared as input
 			}
 		}
 	  });
+	  
+	  let whenElseList=[]; // possible traget variables for when...else
 	  
 	  // vars check and I/O resource usage
 	  circ.vars.forEach(function (val, id) {
@@ -845,8 +876,7 @@ console.log("****************");
 			}
 			if (mod1==="in") {
 				setLog("Note: variable: "+id+" should be declared as input!");
-			}
-			
+			}			
 		}		
 		if (mod==="in" || mod==="out") {
 			stat.incNum(type(val).size, Resource.IO);
@@ -854,9 +884,29 @@ console.log("****************");
 		if (hdl(val).assignments>1) {
 			stat.incNum(1, Resource.MUX);
 		}
-		
+		// when...else ?
+		if (hdl(val).assignop==="=" && hdl(val).assignments===2) {whenElseList.push(id);}			
 	  });
 	  
+console.log(whenElseList);  
+	  whenElseList.forEach(function(id) {		  
+		  circ.getBlok().statements.forEach(function(st) {
+			 if (st.get().id==="if") {
+				let block = st.get().ifBlock;				
+				if (block.statements[0].get().id==="=" && block.statements[0].get().target.get().name===id) {					
+					let block2 = st.get().elseBlock;
+					if (block2!==undefined) {
+						if (block2.statements[0].get().id==="=" && block2.statements[0].get().target.get().name===id) {
+console.log("***** found "+id+" in IF-ELSE block");
+						}
+					}				
+				}				
+			 }
+			 
+		  });
+		  
+	  });
+
 	  setStat(stat.emit());	  
 	  
 	  if (log) {
@@ -872,7 +922,7 @@ console.log("****************");
 			sigmode = ",";
 			if (hdl(v).mode!==undefined) sigmode=","+hdl(v).mode;
 			as = ",";
-			if (hdl(v).assignop!==undefined) as=","+hdl(v).assignop+hdl(v).assignments;
+			if (hdl(v).assignop!==undefined) {as=","+hdl(v).assignop+hdl(v).assignments;}
 			console.log(v.visit()+":"+type(v).id+" "+ //" val="+vec.out(v.val(), type(v).unsigned)+" mode="+mode(v)+" type="+
 			typeToString(type(v))+sigmode+as);
 			//" "+type(v).id+" hdl="+hdl(v).mode+" ");

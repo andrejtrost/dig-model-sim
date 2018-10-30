@@ -84,6 +84,14 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	}
 	return r;
   }
+  
+  function shiftRight(a, n) { // test for < 32 bits
+	let r=[a[0], a[1]];
+	
+	r[0] = (r[0] >> n);
+	
+	return r;
+  }
 	
   function concat(a,b, sizeB) { // concat
     const left = {...a};
@@ -256,5 +264,5 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
 	  return res;
   }
   
-  return {zero, isZero, parse, out, hex, mask, op, unary, cmp, complement, shiftLeft, concat};
+  return {zero, isZero, parse, out, hex, mask, op, unary, cmp, complement, shiftLeft, shiftRight, concat};
 }

@@ -21,17 +21,29 @@ function range(sz) {
   return "(<span class='w3-text-deep-orange'>" + (sz-1) + "</span> " + "downto <span class='w3-text-deep-orange'>0</span>)";
 }
 
+//TODO: use userint swith for vector size
 function initValue(variable, value) 
 {
   let str = "";
+  const size = type(variable).size;
   if (type(variable).size === 1) { // single bit constant
 	if (Number(value)%2 === 1) {str += "'1'";}
 	else {str += "'0'";}
   } else {
-	if (type(variable).unsigned) {
-		str += "to_unsigned("+value+","+type(variable).size+")";
+	if (type(variable).size<9) {  // currently use binary for vectors < 9 bits
+		const bin = Number(value).toString(2);
+		const numSz = bin.length;
+		if (numSz <= size) {
+			str +="\""+bin.padStart(size, '0')+"\"";
+		} else {		
+			str += "\""+bin.slice(-size)+"\"";
+		}
 	} else {
-		str += "to_signed("+value+","+type(variable).size+")";			
+		if (type(variable).unsigned) {
+			str += "to_unsigned("+value+","+type(variable).size+")";
+		} else {
+			str += "to_signed("+value+","+type(variable).size+")";			
+		}
 	}
   }
   return str;

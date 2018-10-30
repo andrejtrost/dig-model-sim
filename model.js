@@ -68,6 +68,9 @@ function Stat() {    // statistics and tmp values
 	let names = new Set([]); // set of variable names
 	let pos = {x:0, y:0}; // model visit position
 	
+	let blockLevel;
+	let blockArray;
+	
 	function init() {
 		numIO = 0;
 		numFF = 0;
@@ -77,15 +80,34 @@ function Stat() {    // statistics and tmp values
 		numMux = 0;
 		io = new Set([]);
 		ff = new Set([]);
+		
+		blockLevel = 0;
+		blockArray = [0, 0];		
 	}
 	
 	function initNames() {names = new Set([]);}
 	function addName(o) {names.add(o);}
 	function getNames(o) {return names;}
 	
-	//function initItem() { item = []; }	
-	//function pushItem(o) { item.push(o); }
-	//function getItem() { return item;}
+	function blockName() {
+		let str = (blockArray[0]+1);
+		let i;
+		for (i=1; i<=blockLevel; i+=1) {
+			str += "."+(blockArray[i]+1);
+		}		
+		return str;
+	}
+	function pushBlock() {
+		blockLevel += 1;		
+		if (blockArray[blockLevel]===undefined) {blockArray[blockLevel]=0;}
+	}
+	function popBlock() { // check if 0!!
+		if (blockLevel>0) {
+			blockArray[blockLevel] += 1;
+			blockArray[blockLevel+1] = 0;
+			blockLevel -= 1;
+		}
+	}
 	
 	function setPos(p) { pos = p; }
 	function getPos() { return pos;}
@@ -120,7 +142,7 @@ function Stat() {    // statistics and tmp values
 		return s;
 	}
 	
-	return {init, initNames, addName, getNames, setPos, getPos, addID, getSet, incNum, emit};
+	return {init, initNames, addName, getNames, blockName, pushBlock, popBlock, setPos, getPos, addID, getSet, incNum, emit};
 }
 
 stat = new Stat(); // global status object, resource statistics and global tmp values
@@ -192,16 +214,25 @@ function Slice(v, h, l) {
 	let high = Number(h);
 	let low = Number(l);
 	let size = high-low+1;
+	let mask = Object.assign({}, vec.mask(high-low+1));
 	
-	function val() {return variable.get();} // todo
-		
+	function val() {
+		let v = vec.shiftRight(variable.val(), low);
+		v[0] &= mask[0];
+		v[1] &= mask[1];
+	
+		return v;
+	} 
+	
+	//function setVal(v) {}  not applicable, slice is used only on expression right 
+
 	function get() { // pass the variable info
 		let v = variable.get();
 		let type = Object.assign({}, v.type);
 		let hdl = Object.assign({}, v.hdl);
 		
 		type.size = size;
-		const o = {isVar:true, name:v.name, mode:v.mode, type:type, hdl:hdl}
+		const o = {isVar:true, name:v.name, mode:v.mode, type:type, hdl:hdl};
 		return o;
 	}
 	
@@ -291,7 +322,8 @@ function Var(s) { "use strict";
  
  function setNext(n) { // if masked input != value, set nextValue & return true
 	if (!(Array.isArray(n) && n.length===2)) {
-		console.log("Var.setNext param error");
+		console.log("Var.setNext "+obj.name+" param error");		
+		console.log(n);
 		return;
 	}
 	nextValue[0] = (n[0] & obj.mask[0])>>>0;
@@ -364,7 +396,7 @@ function Op(o, optType) { "use strict";
 	}
  }
  
- function val() {
+ function val() {	 	
 	if (obj.op==="") {return obj.left.val();}
 	if (obj.left===null) {
 	  return vec.unary(obj.op, obj.right.val());
@@ -485,6 +517,7 @@ function Op(o, optType) { "use strict";
 	}
 	return "resize("+str+","+newsize+")";
  } 
+ 
  
  function numToVector(numObj, size, forceSize, unsigned) {
 	const str = numObj.emitVHD();  // integer number in string
@@ -1202,7 +1235,8 @@ function Blok(namestring) {
  
  function visit(pass, vars) {
 //console.log("Block.visit "+pass+" "+obj.name);	 
-    let str = "Blok("+obj.level+" c:"+obj.combCnt+" s:"+obj.seqCnt+"): \n";
+    //let str = "Blok("+obj.level+" c:"+obj.combCnt+" s:"+obj.seqCnt+"): \n";
+	let str = "B"+obj.name+": \n";
 	statements.forEach(function (st) {
 		stat.setPos(st.get().pos); // save current visit statement position
 		if (pass===1) {
@@ -1222,7 +1256,7 @@ function Blok(namestring) {
 		}
 	});
 	if (log) {console.log("Block: comb="+obj.combCnt+" seq="+obj.seqCnt);}
-	str += "Blok end:"+" c:"+obj.combCnt+" s:"+obj.seqCnt+"): \n";
+//	str += "Blok end:"+" c:"+obj.combCnt+" s:"+obj.seqCnt+"): \n";
 	return str;	
  }
 	

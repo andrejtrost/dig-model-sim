@@ -392,8 +392,18 @@ function draw_bus(r, nstart, nend, vvs, vns, in_out, fmt)  // risanje vodila, gl
   ctx.beginPath();
   ctx.lineWidth = 2;
   ctx.strokeStyle = (in_out == "out" || in_out == "buffer") ? "blue" : "black";
-	
+  if (fmt[0]==="a") {ctx.strokeStyle = "green";} // analog format
+  
+  var m = ports[r].max;
+  var ofs = ports[r].min;
+  if (ports[r].type==="signed") m = m-ports[r].min;
+  
   for (var j=0; j < nend-nstart; j++) {
+	  if (fmt[0]==="a") {
+		  var n = ((Number(signals[r][nstart+j])-ofs)*31)/m;
+		  ctx.moveTo(100 + j*wave.dx(),vns-n+5);
+		  ctx.lineTo(100 + (j+1)*wave.dx(),vns-n+5);								  
+	  } else {		  
 	if (j == 0) {    
 		ctx.moveTo(100,vvs);
 		ctx.lineTo(100+wave.dx(),vvs); 
@@ -415,6 +425,7 @@ function draw_bus(r, nstart, nend, vvs, vns, in_out, fmt)  // risanje vodila, gl
 			ctx.lineTo(100 + wave.dx()*(j+1)-1,vns);
 		}
 	}
+	  }
   }
   ctx.stroke();
 
@@ -428,18 +439,19 @@ function draw_bus(r, nstart, nend, vvs, vns, in_out, fmt)  // risanje vodila, gl
   ctx.textAlign="center";
   ctx.fillStyle = (fmt[0]==="b") ? "blue" : "black";
   
-  for (j=1; j < nend-nstart; j++) {
-	if (signals[r][nstart+j] != value) {
-	    if ((j-first)*wave.dx() > ctx.measureText(strValue).width) //izpis, ce je dovolj prostora		  
-	      ctx.fillText(strValue, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);		
-		value = signals[r][nstart+j];
-		strValue = (fmt[0]==="b") ? numToBin(signals[r][nstart+j], fmt.slice(1)) : signals[r][nstart+j];
-		first = j;
-	}
+  if (fmt[0]!=="a") {
+	  for (j=1; j < nend-nstart; j++) {
+		if (signals[r][nstart+j] != value) {
+			if ((j-first)*wave.dx() > ctx.measureText(strValue).width) //izpis, ce je dovolj prostora		  
+			  ctx.fillText(strValue, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);		
+			value = signals[r][nstart+j];
+			strValue = (fmt[0]==="b") ? numToBin(signals[r][nstart+j], fmt.slice(1)) : signals[r][nstart+j];
+			first = j;
+		}
+	  }
+	  
+	  ctx.fillText(strValue, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);
   }
-  
-  ctx.fillText(strValue, 100 + ((j-1 - first)/2)*wave.dx() + first*wave.dx() + wave.dx()/2, vns - 5);
-  
  }
 }
    
@@ -493,8 +505,13 @@ function graf_plot()  //izris vseh signalov v razpredelnici
         ctx.fillText(ports[n].name, 85, vns - 5);
      
         // v izris posameznega signala               
-        ctx.beginPath();
-
+        if (ports[n].format[0]==="a") {
+			ctx.strokeStyle="lightgray ";
+			ctx.beginPath();
+			ctx.moveTo(100, vns-12);
+			ctx.lineTo(100 + (nend-nstart)*wave.dx(),vns-12);
+			ctx.stroke();
+		}
 		if (ports[n].type == "std_logic") draw_bit(n, nstart, nend, vvs, vns, ports[n].mode);        
         else draw_bus(n, nstart, nend, vvs, vns, ports[n].mode, ports[n].format); //*******
     }
@@ -541,6 +558,7 @@ function graf_click(e) {
 		if (ports[cy] instanceof Vec) {
 			const size = ports[cy].format.slice(1);
 			if (ports[cy].format[0]==="d") {ports[cy].format = "b"+size;}
+			else if (ports[cy].format[0]==="b") {ports[cy].format = "a"+size;}
 			else {ports[cy].format = "d"+size;}
 			graf();
 		}
@@ -571,6 +589,7 @@ function graf_click(e) {
 			if (ports[cy] instanceof Vec) {
 				const size = ports[cy].format.slice(1);
 				if (ports[cy].format[0]==="d") {ports[cy].format = "b"+size;}
+				else if (ports[cy].format[0]==="b") {ports[cy].format = "a"+size;}
 				else {ports[cy].format = "d"+size;}
 				graf();
 			}		
