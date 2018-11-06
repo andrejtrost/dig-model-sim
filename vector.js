@@ -87,8 +87,10 @@ function Vector() { // storage Array obj: 1:MSB, 0:LSB
   
   function shiftRight(a, n) { // test for < 32 bits
 	let r=[a[0], a[1]];
+	const m = mask(n);
 	
-	r[0] = (r[0] >> n);
+	r[0] = ((r[1] & m[0]) << (32-n)) | (r[0] >> n)
+	r[1] = (r[1] >> n);
 	
 	return r;
   }

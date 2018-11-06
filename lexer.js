@@ -37,6 +37,8 @@ function Token(tokenName, tokenType, position, numFormat) {
  function isEOF() {return (type==="");}
  function isComparison() {return (type==="co");}
  
+ function isVHD() {return (type==="v");}
+ 
  function emit() {return "("+id+"."+type+" "+xy.y+":"+xy.x+")";}
  function pos() {
 	return xy.y+":"+xy.x;
@@ -44,7 +46,7 @@ function Token(tokenName, tokenType, position, numFormat) {
  function format() { return fmt; }
 // console.log("Token: '"+id+"' "+position.y+","+position.x); 
  
- return {id, isID, isNum, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos, format};
+ return {id, isVHD, isID, isNum, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos, format};
 }
 
 
@@ -83,7 +85,17 @@ function Lexer(txt) {
 		if (index>=len) { // end of source
 		    look = new Token("e", "", pos0);
 			return;
-		}
+		}		
+		
+		if (nextCh==="-") { // test for comment
+			getCh();
+			if (nextCh==="-") {	// skip comment
+				while (index<len && nextCh!=="\n") {getCh();}
+			} else {
+				look = new Token("-", "op", pos);
+				return;
+			}
+		} 
 		
 		if (isDigit(nextCh)) {			
 			z = getCh();
@@ -105,12 +117,14 @@ function Lexer(txt) {
 			}
 		} else if (isIDStart(nextCh)) {
 			z = getCh();
-			while (isIDchar(nextCh)) {z += getCh();}			
+			while (isIDchar(nextCh)) {z += getCh();}
+			//if (z==="and" && setup.syntaxC) setLog("Warning: and operator in C syntax")
+			
 			switch (z) {
-				case "and": look = new Token("&", "?", pos0); break;
-				case "or":  look = new Token("|", "?", pos0); break;
-				case "not":  look = new Token("~", "?", pos0); break;
-				case "xor": look = new Token("^", "?", pos0); break;
+				case "and": look = new Token("&", "v", pos0); break;
+				case "or":  look = new Token("|", "v", pos0); break;
+				case "not":  look = new Token("~", "v", pos0); break;
+				case "xor": look = new Token("^", "v", pos0); break;
 				case "if": look = new Token("if", "if", pos0); break;
 				case "else": look = new Token("else", "else", pos0); break;
 				default: look = new Token(z, "id", pos0);
@@ -164,13 +178,21 @@ function Lexer(txt) {
 					} else {
 						look = new Token("!", "?", pos);
 						getCh();
-					}		
+					}
+				} else if (nextCh==="/") {
+					if (peekCh()==="=") {
+						look = new Token("!=", "v", pos);
+						getCh(); getCh();
+					} else {
+						look = new Token("/", "?", pos);
+						getCh();
+					}					
 				} else if (nextCh==="&") {
 					if (peekCh()==="&") {
 						look = new Token("&&", "bo", pos);
 						getCh(); getCh();
 					} else {
-						look = new Token("&", "?", pos);
+						look = new Token(",", "?", pos);
 						getCh();
 					}
 				} else if (nextCh==="|") {
@@ -181,7 +203,7 @@ function Lexer(txt) {
 						look = new Token("|", "?", pos);
 						getCh();
 					}					
-				} else if (nextCh==="+" || nextCh==="-" || nextCh==="*") {
+				} else if (nextCh==="+" || nextCh==="*") {
 					look = new Token(nextCh, "op", pos);
 					getCh();
 				} else if (nextCh==="{" || nextCh==="}") {

@@ -170,16 +170,16 @@ function searchComb(b, level) {  // traverse code block
 	b.statements.forEach(function(st) {
 //console.log("TR "+level+" st:"+st.get().id+" "+combProc);
 		  if (st.get().id==="if") {
+			let setIfComb = false;   // change 0611  
 			let b1 = st.get().ifBlock;
 			let b2 = st.get().elseBlock;
-			if (b1.get().combCnt > 0) {combProc = true;}
-			if (searchComb(b1, level+1)) {combProc = true;}
+			if (b1.get().combCnt > 0) {combProc = true; setIfComb = true;}
+			if (searchComb(b1, level+1)) {combProc = true; setIfComb = true;}
 			if (b2!== null) {
-				if (b2.get().combCnt > 0) {combProc = true;}
-				if (searchComb(b2, level+1)) {combProc = true;}
+				if (b2.get().combCnt > 0) {combProc = true; setIfComb = true;}
+				if (searchComb(b2, level+1)) {combProc = true; setIfComb = true;}
 			}
-//console.log("TR comb:"+combProc);
-			st.set({combProc: combProc});  // mark if statement !
+			st.set({combProc: setIfComb});  // mark if statement !
 //console.log("POP IF "+b1.get().combCnt+combProc);
 		  }
 	  });

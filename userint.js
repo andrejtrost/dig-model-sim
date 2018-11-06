@@ -3,11 +3,37 @@
 
 const english = false; // Log language
 let code=undefined;    // global code
-let nPorts = 1; // number of ports, port = in, out or internal signal observed in waveform
 
-function parseCode() // defined in parsesim.js
+/* GLOBAL setup: 
+    ver: version string, sytnaxC: true for C op syntax,
+    setup.nPorts: number of ports 
+*/
+let setup = {ver: 0, syntaxC: false, nPorts: 1}; 
+
+function getSetup() { // read document form settings, display version
+	const v = (parseVersion===undefined) ? -1 : parseVersion;
+ 
+	document.getElementById('version').innerHTML = v;
+	const synt = document.getElementById("syntaxc").checked;
+	setup.syntaxC = synt;
+console.log("Syntax: "+synt);
+}
+
+function copyVHDL() {
+	let el = document.getElementById("vhdllog");
+    let range = document.createRange();
+	range.selectNodeContents(el);
+	let sel = window.getSelection();
+	sel.removeAllRanges();
+	sel.addRange(range);
+	document.execCommand("copy");	
+}
+
+
+function parseCode() // get setup and source, run Lexer and Parse
 {
-  const ta = document.getElementById(textID);
+  getSetup();
+  const ta = document.getElementById(textID);  
   const k = new Lexer("{\n"+ta.value+"}");
    
   code = new Parse(k);
@@ -56,6 +82,8 @@ function errTxt(str, id) {  // compose error log text, use global english
 		                             "Neveljavna uporaba Signed in Unsigned v izrazu!"; break;
 		case "limit": s = (english) ? "Concatenation size > 64 bits!" : "Sestavljen signal > 64 bitov!"; break;
 		case "unsh": s = (english) ? "Shift right unsupported in this expression!" : "Pomik desno ni podprt v tem izrazu!"; break;
+		case "cuse": s = (english) ? "Operator not supported in VHDL syntax!" : "Operator ni podprt v sintaksi VHDL!"; break;
+		case "vuse": s = (english) ? "Operator not supported in C syntax!" : "Operator ni podprt v sintaksi C!"; break;
 		// simulator errors
 		case "inf": s = (english) ? "Simulation infinite loop!" : "Simulacija v neskončni zanki!"; break;
 		// input errors
@@ -103,7 +131,7 @@ function getPorts() {  // get Ports data from html form
 	
 	var typepatt = /^(s|u)([0-9]*)$/;
 	//setLog("GetPorts");
-	[...Array(nPorts)].forEach(function(_, i) {
+	[...Array(setup.nPorts)].forEach(function(_, i) {
 		id = document.getElementById("name"+(i+1)).value; // port name can be a list
 		let a = id.split(",");
 		//console.log(a);
@@ -153,7 +181,7 @@ function addPort() {
 	let name = "";
 	let mode = "";
 	let type = "";
-	[...Array(nPorts)].forEach(function(_, i) {		
+	[...Array(setup.nPorts)].forEach(function(_, i) {		
 		name = document.getElementById("name"+(i+1)).value;
 		s1 += htmInput(i+1, "name", 6, name);
 		mode = document.getElementById("mode"+(i+1)).value;
@@ -162,10 +190,10 @@ function addPort() {
 		s3 += htmInput(i+1, "type", 1, type);
 	});
 	
-	nPorts += 1;
-	s1 += htmInput(nPorts, "name", 6, "");
-	s2 += htmInput(nPorts, "mode", 1, "");
-	s3 += htmInput(nPorts, "type", 1, type);
+	setup.nPorts += 1;
+	s1 += htmInput(setup.nPorts, "name", 6, "");
+	s2 += htmInput(setup.nPorts, "mode", 1, "");
+	s3 += htmInput(setup.nPorts, "type", 1, type);
 	document.getElementById("inName").innerHTML = s1;
 	document.getElementById("inMode").innerHTML = s2;
 	document.getElementById("inType").innerHTML = s3;
@@ -173,9 +201,9 @@ function addPort() {
 }
 
 function removePort() {
-	if (nPorts<2) {return;}
+	if (setup.nPorts<2) {return;}
 	
-	nPorts -= 1;
+	setup.nPorts -= 1;
 	let s = document.getElementById("inName").innerHTML;
 	var n = s.lastIndexOf("<input");
 	document.getElementById("inName").innerHTML = s.substring(0, n);

@@ -2,8 +2,8 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const version = "V.19";
-const textID = "vhdl";
+const parseVersion = "V.19";
+const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
 
@@ -170,7 +170,12 @@ function Parse(k) {
 		const er = (english) ? "Parse Error " : "Napaka ";
 		const er1 = (english) ? "at " : "v ";
 		return "<span style='color: red;'>"+er+"</span>"+er1+peek().pos()+": "+errTxt(str, id);
-	} 	
+	}
+	// check if peek() contains op and if it has correct syntax setup
+	function testOp() {
+		if (peek().isVHD() && setup.syntaxC) {throw parseErr("vuse");}
+		if (!peek().isVHD() && !setup.syntaxC) {throw parseErr("cuse");}
+	}	
 	
 	function primary(n) { // primary :== name | literal | ( expression )
 		let t=peek();
@@ -205,6 +210,7 @@ function Parse(k) {
 		let t=peek();		
 		
 		if (t.id==="-" || t.id==="~") { // unary operator
+			if (t.id==="~") testOp();
 			let o = consume().id;
 			// set empty or create new Op
 			if (x.getOp()==="") {x.op(o);} 
@@ -278,8 +284,12 @@ function Parse(k) {
 		let x = term(n);
 		if (x === undefined) {return;}
 						
-		while (peek().id==="+" || peek().id==="-" || peek().id===",") {
-			let o = consume().id;
+		// special case for concat
+		
+		while (peek().id==="+" || peek().id==="-" || (peek().id==="," && !setup.syntaxC)) {
+			let o;
+		
+			o = consume().id;
 			// set empty or create new Op
 			if (x.getOp()==="") {x.op(o);} 
 			else {x = new Op({op:o, left:x, right:null});}			
@@ -322,6 +332,7 @@ function Parse(k) {
 		if (x === undefined) {return;}
 						
 		if (peek().id==="<<" || peek().id===">>") {  // currently only <<
+			testOp();
 			let o = consume().id;
 				
 			// second operand (fixed number)
@@ -374,8 +385,16 @@ function Parse(k) {
 		let x = relationAND(n);
 		if (x === undefined) {return;}
 						
-		while (peek().id==="&") {
-			let o = consume().id;
+		while ((peek().id==="&" && !setup.syntaxC) || (peek().id==="," && setup.syntaxC)) {
+			let o;
+			if (peek().id===",") { // consume & and set operator to ","
+				consume().id;
+				o = "&";
+			} else {
+				o = consume().id;				
+			}
+			
+			//let o = consume().id;
 			// set empty or create new Op
 			if (x.getOp()==="") {x.op(o);} 
 			else {x = new Op({op:o, left:x, right:null});}			
@@ -411,15 +430,15 @@ function Parse(k) {
 		return x;
 	}
 	
-	
 	function expression(n) {  // expression :== relation { OR,XOR relation}
 		let x = relation(n);
 		let o = "?";
 		if (x === undefined) {return;}
 		
 		while (peek().id==="|" || peek().id==="^") { 
+			testOp();
 			o = consume().id;
-			
+		
 			if (x.getOp()==="") { // set empty or create new operation
 				x.op(o);
 			} else {
@@ -459,40 +478,6 @@ function Parse(k) {
 		return x;
 	}
 	
-	function exprList(n) {
-		let x = expression(n);
-		let o = "?";
-		if (x === undefined) {return;}
-		//console.log("term type: "+x.getType().size);
-		
-		while (peek().id===",") { // expression list, concatenation operator
-			o = consume().id;
-			
-			if (x.getOp()==="") { // set empty or create new operation
-				x.op(o);
-			} else {
-				const opType={...type(x)};   //copy type property
-				x = new Op({op:o, left:x, right:null}, opType); // type(x)
-			}
-			
-			// second term
-			let x2 = term(new Op({op:"", left:null, right:null}));
-			x.right(x2);
-
-			let sz = type(x).size + type(x2).size;
-			if (sz>64) {throw parseErr("limit");}
-			
-			const u1 = type(x).unsigned;
-			const u2 = type(x2).unsigned;
-			/*if ((u1 && !u2) || (!u1 && u2)) {
-				throw parseErr("mixs");        // TODO: maybe no error?
-			}*/
-			// set operator sign of the left
-			x.set({type: {unsigned: u1, size: sz}});
-		}
-		return x;
-	}	
-	
 	function parseAssign(v, op, pos) // assignment expression (take var v)
 	{
 		let a = new Statement(op);  // statement, define target, position and level
@@ -504,7 +489,7 @@ function Parse(k) {
 		
 		// opnode
 		let node = new Op({op:"", left:null, right:null});		
-		node = exprList(node);
+		node = expression(node); //exprList(node);
 		
 		if (node === undefined) {return;}
 		a.setExpr(node);
@@ -544,9 +529,19 @@ function Parse(k) {
 //console.log("parse:com: "+e.visit(true)+" Ctype: "+typeToString(type(e)));	
 		if (e === undefined) {return;}
 		
-		//let isVar = false;
-		if (isComparisonOp(peek().id)) {
-			let o = consume().id;
+		let opEqual = false;
+		if (peek().id==="=") {
+			if (setup.syntaxC) {throw parseErr("vuse");}
+			opEqual=true;  // VHDL comparison op (=)
+		} 
+		if (isComparisonOp(peek().id) || opEqual) {			
+			let o;
+			if (opEqual) {o="=="; consume();}
+			else {
+				if (peek().id==="!=" || peek().id==="==") {testOp();}
+				o=consume().id;				
+			}
+			
 			if (e.getOp()==="") { // prazna operacija
 				e.op(o);
 				// check for id ==
@@ -862,7 +857,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		}
 	  });
 	  
-	  let whenElseList=[]; // possible traget variables for when...else
+	  let whenElseList=[]; // possible traget variables for when...else, TODO
 	  
 	  // vars check and I/O resource usage
 	  circ.vars.forEach(function (val, id) {
@@ -888,16 +883,16 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		if (hdl(val).assignop==="=" && hdl(val).assignments===2) {whenElseList.push(id);}			
 	  });
 	  
-console.log(whenElseList);  
+//console.log(whenElseList);  
 	  whenElseList.forEach(function(id) {		  
 		  circ.getBlok().statements.forEach(function(st) {
 			 if (st.get().id==="if") {
 				let block = st.get().ifBlock;				
 				if (block.statements[0].get().id==="=" && block.statements[0].get().target.get().name===id) {					
 					let block2 = st.get().elseBlock;
-					if (block2!==undefined) {
+					if (block2!==null) {
 						if (block2.statements[0].get().id==="=" && block2.statements[0].get().target.get().name===id) {
-console.log("***** found "+id+" in IF-ELSE block");
+console.log("***TODO*** found "+id+" in IF-ELSE block");
 						}
 					}				
 				}				
