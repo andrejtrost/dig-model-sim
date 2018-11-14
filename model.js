@@ -392,6 +392,7 @@ function Op(o, optType) { "use strict";
 		if (o.type.hasOwnProperty("size")) {obj.type.size = o.type.size; log+=" size:"+o.type.size;}
 		if (o.type.hasOwnProperty("unsigned")) {obj.type.unsigned = o.type.unsigned; log+=" u:"+o.type.unsigned;}
 		if (o.type.hasOwnProperty("format")) {obj.type.format = o.type.format; log+=" f:"+o.type.format;}
+		if (o.type.hasOwnProperty("bool")) {obj.type.bool = o.type.bool; log+=" b:"+o.type.bool;}
 	    if (logset) {console.log("Op.set "+obj.op+" type "+log);}
 	}
  }
@@ -402,8 +403,12 @@ function Op(o, optType) { "use strict";
 	  return vec.unary(obj.op, obj.right.val());
 	}
 	if (isComparisonOp(obj.op)) {
-//console.log("*** CMP "+typeToString(obj.type));
-		return vec.cmp(obj.op, obj.left.val(), obj.right.val(), obj.type);
+		let max = Math.max(type(obj.left).size, type(obj.right).size);
+		let cmpType = {size:max, unsigned:type(obj.left).unsigned};
+console.log("*** CMP size="+max); //+typeToString(obj.type));
+		return vec.cmp(obj.op, obj.left.val(), obj.right.val(), cmpType);
+		
+		//obj.type);
 	}
 	if (obj.op===",") {
 		return vec.concat(obj.left.val(), obj.right.val(), type(obj.right).size);
@@ -426,12 +431,15 @@ function Op(o, optType) { "use strict";
 			//console.log("!!!Op type: "+obj.type.id);
 		}
 	} else {
+//console.log("op.visit '"+obj.op+"'");		
 		if (isComparisonOp(obj.op)) { // test comparison
+//console.log("cmp.visit1 '"+obj.op+"'");				
 			if (obj.left===null || obj.right===null) {
 				console.log("op.visit: Unexpected empty comparison!");
 			} else {				
 				// check if compare sig of same type and different size or sign
 				if (type(obj.left).id === "sig" && type(obj.right).id === "sig") {
+//console.log("cmp.visit2 "+type(obj.left).size+" r:"+type(obj.right).size);
 					if (type(obj.left).size !== type(obj.right).size) {
 						throw modelErr("cmpsz", "", stat.getPos());
 						// Illegal comparison of different size variables!
@@ -488,6 +496,7 @@ function Op(o, optType) { "use strict";
 					} else {console.log("Op.visit unexpected type id! "+id2);}
 				}
 				if (obj.op===",") {obj.type.id = "sig";} // TODO: check NUM
+				if (isComparisonOp(obj.op)) {obj.type.id = "bit";} // Compare is allways type: bit
 			}
 				
 		}
@@ -603,14 +612,14 @@ function Op(o, optType) { "use strict";
 console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
  			if (isComparisonOp(obj.op)) { // handle comparison
 				if ((lt.id==="bit") && (rt.id==="num")) {
-					return obj.left.emitVHD()+" "+op+" '"+obj.right.emitVHD()+"'";
+					return "("+obj.left.emitVHD()+" "+op+" '"+obj.right.emitVHD()+"')";
 				} else if ((lt.id==="num") && (rt.id==="bit")) {
-					return "'"+obj.left.emitVHD()+"' "+op+" "+obj.right.emitVHD();
+					return "('"+obj.left.emitVHD()+"' "+op+" "+obj.right.emitVHD()+")";
 				} else {
-					return obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
+					return "("+obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD()+")";
 				}
 			} else {
-				
+console.log("!!! Op.emit "+op+" left:"+lt.id+lt.size+" r:"+rt.id+rt.size);				
 				str = "(";
 				if (lt.id==="num") {
 					if (rt.id==="num") { // 1A
@@ -666,7 +675,7 @@ console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
 						str += resizeVar(exp, obj.type.size, 1);
 						
 					} else if (rt.id==="bit") { // 2B
-						exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+						exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 						if (op==="&") {
 							if (lt.size+rt.size !== obj.type.size) {
 								str += resizeVar(exp, obj.type.size, 2);
@@ -678,7 +687,7 @@ console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
 						}
 					} else if (rt.id==="sig") { // 2C
 						if (op==="&") {
-							exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+							exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 							if (lt.size+rt.size !== obj.type.size) {
 								str += resizeVar(exp, obj.type.size, 2);
 							} else {
@@ -722,9 +731,9 @@ console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
 						} else if (op==="+" || op==="-") {  // sig +/- num do not require integer conversion
 							numStr = obj.right.emitVHD();
 							if (obj.type.size === lt.size) {
-								str += obj.left.emitVHD()+" "+op+"  "+numStr;
+								str += obj.left.emitVHD()+" "+op+" "+numStr;
 							} else {  // resize only sig	
-								str += "resize("+obj.left.emitVHD()+","+(obj.type.size)+") "+op+"  "+numStr;
+								str += "resize("+obj.left.emitVHD()+","+(obj.type.size)+") "+op+" "+numStr;
 							}					
 						} else {
 							numStr = numToVector(obj.right, lt.size, true, lt.unsigned);	
@@ -739,7 +748,7 @@ console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
 						}						
 					} else if (rt.id==="bit") { // 3B  OK
 						if (op==="&") {
-							exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+							exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 							if (lt.size+rt.size !== obj.type.size) {
 								str += resizeVar(exp, obj.type.size, 2);
 							} else {
@@ -769,12 +778,12 @@ console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
 					} else if (rt.id==="sig") {  // 3C
 						// check +/- for carry (resize one )
 						if ((op==="+" || op==="-") && (obj.type.size > Math.max(lt.size, rt.size))) {
-							str += resizeVar(obj.left.emitVHD(), obj.type.size, lt.size)+" "+op+"  "+
+							str += resizeVar(obj.left.emitVHD(), obj.type.size, lt.size)+" "+op+" "+
 								   resizeVar(obj.right.emitVHD(), obj.type.size, rt.size);
 						} else if (op==="*") {
 							str += resizeVar(obj.left.emitVHD()+op+obj.right.emitVHD(), obj.type.size, lt.size+rt.size);
 						} else if (op==="&") {
-							//exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+							//exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 							exp = sigSign(obj.left,obj.type.unsigned)+" "+op+" "+
 							      sigSign(obj.right,obj.type.unsigned);
 console.log("Exp: "+exp+"L:"+lt.size+lt.unsigned+" R:"+rt.size+rt.unsigned+" Obj:"+obj.type.size);
@@ -788,10 +797,10 @@ console.log("Exp: "+exp+"L:"+lt.size+lt.unsigned+" R:"+rt.size+rt.unsigned+" Obj
 console.log("sig-sig L-R:"+lt.size+"-"+rt.size+" obj"+obj.type.size);
 							let tmpSize = lt.size;
 							if (lt.size === rt.size) {  // resize operand ?
-								exp = obj.left.emitVHD()+" "+op+"  "+obj.right.emitVHD();
+								exp = obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 							} else if (lt.size < rt.size) {
 								tmpSize = rt.size;
-								exp = resizeVar(obj.left.emitVHD(), rt.size, lt.size)+" "+op+"  "+obj.right.emitVHD();
+								exp = resizeVar(obj.left.emitVHD(), rt.size, lt.size)+" "+op+" "+obj.right.emitVHD();
 							} else {
 								exp += obj.left.emitVHD()+" "+op+" "+resizeVar(obj.right.emitVHD(), lt.size, rt.size);
 							}
@@ -1141,6 +1150,9 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 			
 			//str += "\n";
 		} else if (obj.id==="if") {  // if statement, check if belongs to comb
+			let condStr = obj.expr.emitVHD(); // get condition and strip spaces
+			if (condStr.slice(0,1)==="(" && condStr.slice(-1)===")") {condStr = condStr.slice(1, -1);}
+		
 			let doCase = obj.isCase || (obj.elsLink!==undefined && obj.elsLink.isCase) ? true : false;
 console.log("Model: isCase:"+obj.isCase+" "+(obj.elsLink!==undefined && obj.elsLink.isCase));			
 console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);		
@@ -1152,14 +1164,16 @@ console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);
 						const bitSize = type(obj.expr.getLeft()).size;						
 						let bv = bitVector(obj.expr.getRight().emitVHD(), bitSize);						
 						str += spaces + " when "+bv+" =>\n";
-					} else { str += spaces + "if "+obj.expr.emitVHD()+" then\n"; }
+					} else { 						
+						str += spaces + "if "+condStr+" then\n"; 						
+					}
 				} else {            // continue conditional (elsif or when)					
 					if (doCase) {
 						const bitSize = type(obj.expr.getLeft()).size;						
 						let bv = bitVector(obj.expr.getRight().emitVHD(), bitSize);						
 						str += " when "+bv+" =>\n";
 					} else {
-						str += "if "+obj.expr.emitVHD()+" then\n";
+						str += "if "+condStr+" then\n";
 					}
 				}
 

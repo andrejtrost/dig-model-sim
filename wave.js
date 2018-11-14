@@ -168,6 +168,31 @@ function graf_init() { // inicializacija, ID=slide, sliderAmount, slide.onchange
 	signals[i] = new Array();                    
 	for (var j=0; j < cycles; j++) signals[i][j] = 0;
  }*/
+ 
+//Check File API support
+ if (window.File && window.FileList && window.FileReader) {
+	var filesInput = document.getElementById("infile");
+
+	filesInput.addEventListener("change", function(event) {
+		var files = event.target.files; //FileList object
+		var output = document.getElementById("result");
+
+		var file = files[0];
+
+		var picReader = new FileReader();
+
+		picReader.addEventListener("load", function(event) {
+			var textFile = event.target;	
+			load(textFile.result, file.name);
+		});		
+		picReader.readAsText(file); //Read the text file
+	});
+ } else {
+	console.log("Your browser does not support File API");
+ } 
+ 
+ 
+ 
  console.log("init");
 }
 
@@ -505,12 +530,14 @@ function graf_plot()  //izris vseh signalov v razpredelnici
         ctx.fillText(ports[n].name, 85, vns - 5);
      
         // v izris posameznega signala               
-        if (ports[n].format[0]==="a") {
-			ctx.strokeStyle="lightgray ";
-			ctx.beginPath();
-			ctx.moveTo(100, vns-12);
-			ctx.lineTo(100 + (nend-nstart)*wave.dx(),vns-12);
-			ctx.stroke();
+        if (ports[n].type != "std_logic") {
+			if (ports[n].format[0]==="a") {
+				ctx.strokeStyle="lightgray ";
+				ctx.beginPath();
+				ctx.moveTo(100, vns-12);
+				ctx.lineTo(100 + (nend-nstart)*wave.dx(),vns-12);
+				ctx.stroke();
+			}
 		}
 		if (ports[n].type == "std_logic") draw_bit(n, nstart, nend, vvs, vns, ports[n].mode);        
         else draw_bus(n, nstart, nend, vvs, vns, ports[n].mode, ports[n].format); //*******

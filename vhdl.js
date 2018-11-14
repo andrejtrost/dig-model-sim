@@ -51,6 +51,7 @@ function initValue(variable, value)
 
 function VHDLports() {
   if (model===undefined) {return;}
+  var namepatt = /^\w+$/
   setLog("VHDL"); 
   
   let s = "library <b class='w3-text-brown'>IEEE</b>;\n";
@@ -58,6 +59,12 @@ function VHDLports() {
   s += "use <b class='w3-text-brown'>IEEE.numeric_std</b>.all;\n\n"; 		
   
   var comp_name = document.getElementById("comp_name").value;
+  const sName=comp_name.toLowerCase();
+  if (!namepatt.test(comp_name)) {setLog(modelErr("cnam", comp_name));}
+  if (VHDLrsv.indexOf(sName)>=0) {setLog(modelErr("cnam",comp_name));}
+  // test if circuit name = signal name
+  if (model.getVar(sName, true)!==null) {setLog(modelErr("cnam2",comp_name));}
+	
   s += "entity" + " " + comp_name + " is\n"; 
   
   s += " port (\n";

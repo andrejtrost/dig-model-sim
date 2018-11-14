@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.19";
+const parseVersion = "V.20";
 const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -10,7 +10,7 @@ const MAXCYC = 1000;
 let globPrevStatement="";
 
 let vec=new Vector();
-//let model = undefined;
+let model = undefined;
 
 function Circuit() {
  let b = new Blok("1");
@@ -29,15 +29,13 @@ function Circuit() {
 	return "<span style='color: red;'>"+er+"</span>"+errTxt(str, id);
  } 
  
- const VHDLkey=["abs","configuration","impure","null","rem","type","access","constant","in","of","report","unaffected","after","disconnect","inertial","on","return","units","alias","downto","inout","open","rol","until","all","else","is","or","ror","use","and","elsif","label","others","select","variable","architecture","end","library","out","severity","wait","array","entity","linkage","package","signal","when","assert","exit","literal","port","shared","while","attribute","file","loop","postponed","sla","with","begin","for","map","procedure","sll","xnor","block","function","mod","process","sra","xor","body","generate","nand","pure","srl","buffer","generic","new","range","subtype","bus","group","next","record","then","case","guarded","nor","register","to","component","if","not","reject","transport"]; 
- 
  function getVar(id, returnNull) {  // get or create new, if not returnNull
      //console.log("Cir.getVar "+id);
 	 const sId = id.toLowerCase();
 	 
 	 if (!vars.has(id)) {
 		if (returnNull) {return null;}  // if not found, return null
-		if (VHDLkey.indexOf(sId)>=0) { throw idErr("rsv",id); } // is VHDL keyword?
+		if (VHDLrsv.indexOf(sId)>=0) { throw idErr("rsv",id); } // is VHDL keyword?
 	
         // check if exists the same name with different case	 
 	    var ids = Array.from( vars.keys() ).map(v => v.toLowerCase());	
@@ -169,6 +167,9 @@ function Parse(k) {
 	function parseErr(str, id) {
 		const er = (english) ? "Parse Error " : "Napaka ";
 		const er1 = (english) ? "at " : "v ";
+		const line = Number(peek().pos().substr(0, peek().pos().indexOf(':')));
+		selectLine(line);
+		
 		return "<span style='color: red;'>"+er+"</span>"+er1+peek().pos()+": "+errTxt(str, id);
 	}
 	// check if peek() contains op and if it has correct syntax setup
@@ -177,17 +178,39 @@ function Parse(k) {
 		if (!peek().isVHD() && !setup.syntaxC) {throw parseErr("cuse");}
 	}	
 	
-	function primary(n) { // primary :== name | literal | ( expression )
+	function primary(n) { // primary :== name | literal | ( expression )	
 		let t=peek();
 		
 		if (t.isID()) { // identifier, save variable & set op type
 			let v = circ.getVar(consume().id); 
+			if (peek().id === "(") { // variable slice
+				consume();
+				t=peek();
+				if (!t.isNum()) {throw parseErr("explit");}
+				let num = consume().id;
+				let num2 = num;
+				t=peek();
+				if (t.id===":") { 
+					consume(); t=peek();
+					if (!t.isNum()) {throw parseErr("explit");}
+					num2 = consume().id;
+					t=peek();
+				}
+				
+				if (t.id===")") { consume(); }
+				else {throw parseErr("exp",")");} // Expected ) 
+				if (!(num>=num2)) {throw parseErr("slice",")");}
+				if (num>=type(v).size) {throw parseErr("slice",")");}
+				
+				v= new Slice(v,num,num2);
+			}
+			
 			n.left(v);
 			n.set({type: type(v)});
 			return n;
 		}
 		else if (t.isNum()) { // number
-			let token = consume();
+			let token = consume();			
 			let num = new NumConst(token.id, token.format()); 
 			n.left(num); 			
 			n.set({type: type(num)});
@@ -201,12 +224,12 @@ function Parse(k) {
 			  throw parseErr("exp",")"); // Expected ) 
 			}
 			return e;					
-		} else { 
+		} else {
 			throw parseErr("expvn"); //Expected identifier or number
 		}
 	}
 	
-	function factor(x) { // factor :== primary | - primary | NOT primary
+	function factor(x) { // factor :== primary | - primary | NOT primary	
 		let t=peek();		
 		
 		if (t.id==="-" || t.id==="~") { // unary operator
@@ -273,14 +296,14 @@ function Parse(k) {
 				throw parseErr("mixs");
 			}			
 			
-			f.set({type: {unsigned: u1 && u2, size: sz}});					
+			f.set({type: {unsigned: (u1 && u2), size: sz}});					
 			console.log("Term type: "+(u1 && u2)+" "+sz);			
 		}
 		
 		return f;
 	}
 
-	function shift(n) {  // shift :== term {+,- term}
+	function simpleExp(n) {  // simpleExp :== term {+,-,',' term}	
 		let x = term(n);
 		if (x === undefined) {return;}
 						
@@ -289,7 +312,8 @@ function Parse(k) {
 		while (peek().id==="+" || peek().id==="-" || (peek().id==="," && !setup.syntaxC)) {
 			let o;
 		
-			o = consume().id;
+			o = consume().id;			
+			
 			// set empty or create new Op
 			if (x.getOp()==="") {x.op(o);} 
 			else {x = new Op({op:o, left:x, right:null});}			
@@ -298,26 +322,25 @@ function Parse(k) {
 			let x2 = term(new Op({op:"", left:null, right:null})); 
 			x.right(x2);
 			
-			const sz1 = type(x).size;
-			const sz2 = type(x2).size;
+			const sz1 = type(x.getLeft()).size;  // compare left & right 
+			const sz2 = type(x.getRight()).size;
 			let sz = Math.max(sz1, sz2)+1;  // allow carry
 			if (o===",") {sz = sz1+sz2;}
 			
-			let u1 = type(x).unsigned;
-			let u2 = type(x2).unsigned;
+			let u1 = type(x.getLeft()).unsigned;
+			let u2 = type(x.getRight()).unsigned;
 			
 			if (!u1 && u2) { // signed & unsigned number > signed
-				if (type(x2).id==="num") {
-					x2.set({type: {unsigned: false}});
+				if (type(x.getRight()).id==="num") {
+					x.set({type: {unsigned: false}});
 					u2 = false;
 				}
 			} else if (u1 && !u2) { // unsigned num & signed > signed num
-				if (type(x).id==="num") {
+				if (type(x.getLeft()).id==="num") {
 					x.set({type: {unsigned: false}});
 					u1 = false;
 				}				
 			}
-			
 			if ((u1 && !u2) || (!u1 && u2)) {throw parseErr("mixs");}			
 			
 			x.set({type: {unsigned: u1 && u2, size: sz}});		
@@ -327,8 +350,8 @@ function Parse(k) {
 		return x;
 	}	
 	
-	function relationAND(n) {  // relation :== shift [<<, >> literal]
-		let x = shift(n);
+	function shift(n) {  // shift :== simpleExp {<<, >> literal}
+		let x = simpleExp(n);
 		if (x === undefined) {return;}
 						
 		if (peek().id==="<<" || peek().id===">>") {  // currently only <<
@@ -381,8 +404,74 @@ function Parse(k) {
 		return x;
 	}
 	
-	function relation(n) {  // relation :== relationAND { AND relationAND }
-		let x = relationAND(n);
+	function relation(n, boolRel) {  // relation = shift {=, /=, <...} shift 
+		let e = shift(n);
+//console.log("parse:com: "+e.visit(true)+" Ctype: "+typeToString(type(e)));	
+		if (e === undefined) {return;}
+		
+		let opEqual = false;
+		if (peek().id==="=") {
+			if (setup.syntaxC) {throw parseErr("vuse");}
+			opEqual=true;  // VHDL comparison op (=)
+		} 		
+		if (isComparisonOp(peek().id) || opEqual) {			
+			let o;
+			if (opEqual) {o="=="; consume();}
+			else {
+				if (peek().id==="!=" || peek().id==="==") {testOp();}
+				o=consume().id;				
+			}
+			
+			if (e.getOp()==="") { // prazna operacija
+				e.op(o);
+				// check for id ==
+				//if (o==="==" ) {
+				//	if (e.getLeft().get().isVar) {isVar = true;}
+				//}
+			
+			} else {
+				const opType={...type(e)};
+				e = new Op({op:o, left:e, right:null}, opType);
+			}	
+
+			e.set({type: {bool: true}});
+							
+			let e2= shift(new Op({op:"", left:null, right:null}));
+
+			e.right(e2);
+			//if (isVar && type(e2).id==="num") {
+//console.log("FOUND id==num!!");
+			//}
+			
+		    // check if compare sig of same type or sig & num
+			
+			let sz = Math.max(type(e).size, type(e2).size);
+			//let u = type(e).unsigned && type(e2).unsigned;
+console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);			
+			e.set({type: {unsigned: true, size: 1}});
+			
+		} else if (boolRel && type(e).bool!==true) { // add required operator (value != 0)			
+			let o = "!=";
+			let rightObj = new NumConst(0); 
+			
+			if (type(e).size===1) { // ==1, if expression is one bit
+				o = "==";
+				rightObj = new NumConst(1);
+			} 
+			if (e.getOp()==="") { // prazna operacija
+				e.op(o);
+			} else {
+				e = new Op({op:o, left:e, right:null}, type(e)); // TODO: check
+			}										
+			e.right(rightObj);
+		}
+		
+		//let logstr = e.visit(true);   // visit operator for statistics
+		return e;
+	}	
+	
+	function bool (n, boolRel) {  // bool :== relation { AND relation }
+		let x = relation(n, boolRel);
 		if (x === undefined) {return;}
 						
 		while ((peek().id==="&" && !setup.syntaxC) || (peek().id==="," && setup.syntaxC)) {
@@ -400,7 +489,7 @@ function Parse(k) {
 			else {x = new Op({op:o, left:x, right:null});}			
 				
 			// second relation
-			let x2 = relationAND(new Op({op:"", left:null, right:null})); 
+			let x2 = relation(new Op({op:"", left:null, right:null}), boolRel); 
 			x.right(x2);
 			
 			const sz1 = type(x).size;
@@ -430,8 +519,8 @@ function Parse(k) {
 		return x;
 	}
 	
-	function expression(n) {  // expression :== relation { OR,XOR relation}
-		let x = relation(n);
+	function expression(n, boolRel) {  // expression :== bool { OR,XOR bool}		
+		let x = bool(n, boolRel);
 		let o = "?";
 		if (x === undefined) {return;}
 		
@@ -447,7 +536,7 @@ function Parse(k) {
 			}
 			
 			// second relationA
-			let x2 = relation(new Op({op:"", left:null, right:null}));
+			let x2 = bool(new Op({op:"", left:null, right:null}), boolRel);
 			x.right(x2);
 						
 			let sz = Math.max(type(x).size, type(x2).size);			
@@ -524,121 +613,16 @@ function Parse(k) {
 
 	}
 	
-	function comparison(n) {		
-		let e = expression(n);
-//console.log("parse:com: "+e.visit(true)+" Ctype: "+typeToString(type(e)));	
-		if (e === undefined) {return;}
-		
-		let opEqual = false;
-		if (peek().id==="=") {
-			if (setup.syntaxC) {throw parseErr("vuse");}
-			opEqual=true;  // VHDL comparison op (=)
-		} 
-		if (isComparisonOp(peek().id) || opEqual) {			
-			let o;
-			if (opEqual) {o="=="; consume();}
-			else {
-				if (peek().id==="!=" || peek().id==="==") {testOp();}
-				o=consume().id;				
-			}
-			
-			if (e.getOp()==="") { // prazna operacija
-				e.op(o);
-				// check for id ==
-				//if (o==="==" ) {
-				//	if (e.getLeft().get().isVar) {isVar = true;}
-				//}
-			
-			} else {
-				const opType={...type(e)};
-				e = new Op({op:o, left:e, right:null}, opType);
-			}			
-							
-			let e2= expression(new Op({op:"", left:null, right:null}));
-
-			e.right(e2);
-			//if (isVar && type(e2).id==="num") {
-//console.log("FOUND id==num!!");
-			//}
-			
-		    // check if compare sig of same type or sig & num
-			
-			let sz = Math.max(type(e).size, type(e2).size);
-			let u = type(e).unsigned && type(e2).unsigned;
-console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);			
-			e.set({type: {unsigned: u, size: sz}});
-			
-		} else { // add required operator (value != 0)			
-			let o = "!=";
-			let rightObj = new NumConst(0); 
-			
-			if (type(e).size===1) { // ==1, if expression is one bit
-				o = "==";
-				rightObj = new NumConst(1);
-			} 
-			if (e.getOp()==="") { // prazna operacija
-				e.op(o);
-			} else {
-				e = new Op({op:o, left:e, right:null}, type(e)); // TODO: check
-			}										
-			e.right(rightObj);
-		}
-		
-		let logstr = e.visit(true);   // visit operator for statistics
-		return e;
-	}
-	
-	function booland(n) {
-		let c = comparison(n);
-		
-		while (peek().id==="&&") { 
-		    console.log("AND");
-			let o = consume().id;
-			
-			if (c.getOp()==="") { 
-				c.op(o);				
-			} else {
-				c = new Op({op:o, left:c, right:null});
-			}
-			
-			let c2 = comparison(new Op({op:"", left:null, right:null}));
-			c.right(c2);
-			
-			let sz = Math.max(type(c).size, type(c2).size);
-			let u = type(c).unsigned && type(c2).unsigned;
-			c.set({type: {unsigned: u, size: sz}});	
-		}	
-		
-		return c;
-	}
-	
-	function boolop(n) {
-		let c = booland(n);
-		
-		while (peek().id==="||") { 
-		    console.log("OR");
-			let o = consume().id;
-			
-			if (c.getOp()==="") { 
-				c.op(o);				
-			} else {
-				c = new Op({op:o, left:c, right:null});
-			}
-			
-			let c2 = booland(new Op({op:"", left:null, right:null}));
-			c.right(c2);
-			
-			let sz = Math.max(type(c).size, type(c2).size);
-			let u = type(c).unsigned && type(c2).unsigned;
-			c.set({type: {unsigned: u, size: sz}});	
-		}	
-		
-		return c;
+	function boolExp(n) {
+		let b = expression(n, true); // set boolRel to true
+				
+console.log("Condition: op='"+b.getOp()+"'");
+		return b;
 	}
 	
 	function condition() {
 	 let n = new Op({op:"", left:null, right:null});
-	 n = boolop(n);
+	 n = boolExp(n);
 
 console.log("parse:condition type: "+typeToString(type(n)));
 	 return n;

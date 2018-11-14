@@ -76,6 +76,13 @@ function Lexer(txt) {
 		if (i < len) { return str.charAt(i); }
 		else { return ""; }
 	}
+	
+	function skipSpace() {
+		if (index>=len) {return;}
+		if (nextCh===" " || nextCh==="\t") {
+			while (nextCh===" " || nextCh==="\t") {getCh();}
+		}	
+	}
 
 	function scan() {	
 		let z;
@@ -93,6 +100,7 @@ function Lexer(txt) {
 				while (index<len && nextCh!=="\n") {getCh();}
 			} else {
 				look = new Token("-", "op", pos);
+				skipSpace();
 				return;
 			}
 		} 
@@ -216,10 +224,8 @@ function Lexer(txt) {
 			}			
 		}
 		
-		if (index>=len) {return;}
-		if (nextCh===" " || nextCh==="\t") {
-			while (nextCh===" " || nextCh==="\t") {getCh();}
-		}
+		skipSpace();
+				
 	}
 	
 	function peek() { return look; }
