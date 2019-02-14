@@ -1,18 +1,47 @@
 /*File: userint.js (former tabele.js) */
 /*jshint esversion: 6 */
 
-const english = false; // Log language
+let english = false; // Log language
+let markErr = true;
 let code=undefined;    // global code
 
 /* GLOBAL setup: 
     ver: version string, sytnaxC: true for C op syntax,
-    setup.nPorts: number of ports 
+    nPorts: initial number of ports in HTML table
+	maxBinSize: max size of binary bit string for unspecified literals
 */
-let setup = {ver: 0, syntaxC: false, nPorts: 1}; 
+let setup = {ver: 0, syntaxC: false, nPorts: 1, maxBinSize: 8, vhdl2008: true};
 
 // VHDL keywords or reserved identifiers
 const VHDLrsv=["abs","configuration","impure","null","rem","type","access","constant","in","of","report","unaffected","after","disconnect","inertial","on","return","units","alias","downto","inout","open","rol","until","all","else","is","or","ror","use","and","elsif","label","others","select","variable","architecture","end","library","out","severity","wait","array","entity","linkage","package","signal","when","assert","exit","literal","port","shared","while","attribute","file","loop","postponed","sla","with","begin","for","map","procedure","sll","xnor","block","function","mod","process","sra","xor","body","generate","nand","pure","srl","buffer","generic","new","range","subtype","bus","group","next","record","then","case","guarded","nor","register","to","component","if","not","reject","transport","std_logic","signed","unsigned","rising_edge","resize","to_signed","to_unsigned",
 "rtl"]; 
+
+
+function HDLinit() {
+ getSetup();
+	
+	//Check File API support (from wave.js)
+ if (window.File && window.FileList && window.FileReader) {
+	var filesInput = document.getElementById("infile");
+
+	filesInput.addEventListener("change", function(event) {
+		var files = event.target.files; //FileList object
+		var output = document.getElementById("result");
+
+		var file = files[0];
+
+		var picReader = new FileReader();
+
+		picReader.addEventListener("load", function(event) {
+			var textFile = event.target;	
+			load(textFile.result, file.name);
+		});		
+		picReader.readAsText(file); //Read the text file
+	});
+ } else {
+	console.log("Your browser does not support File API");
+ }
+}
 
 function getUrlParameter(name) {
     name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
@@ -22,17 +51,21 @@ function getUrlParameter(name) {
 };
 
 function getSetup() { // read document form settings, display version
+    //setInterval(checkInputCode, 2000);
+
 	const v = (parseVersion===undefined) ? -1 : parseVersion;
  
 	document.getElementById('version').innerHTML = v;
 	const synt = document.getElementById("syntaxc").checked;
 	setup.syntaxC = synt;
-console.log("Syntax: "+synt);
 
+	setup.vhdl2008 = document.getElementById("lang2008").checked;
+	english = document.getElementById("english").checked;
+	markErr = document.getElementById("mark").checked;
 console.log(getUrlParameter('p'));
 }
 
-function parsePorts(id, m, s) {
+function parsePorts(id, m, s, decl) {
 	var typepatt = /^(s|u)([0-9]*)$/;
 	var namepatt = /^\w+$/
 	
@@ -44,6 +77,25 @@ function parsePorts(id, m, s) {
 		throw modelErr("mode", id);
 		m ="";
 	}			
+	
+	// check if type is array
+	let i = 0;	
+	let ch = s.charAt(0);
+	let anum = "";
+	
+	while (ch >= "0" && ch <= "9") {
+		anum += ch;
+		i += 1;
+		ch = s.charAt(i);		
+	}
+	if (anum !== "") {			
+		s = s.slice(anum.length);
+		anum = Number(anum);
+		console.log("NN = "+anum+" s="+s);
+	} else {
+		anum = 0;
+	}
+	
 	if (!typepatt.test(s)) {
 		throw modelErr("type", id);
 	}
@@ -54,28 +106,25 @@ function parsePorts(id, m, s) {
 		throw modelErr("size", id);
 		size = 1;
 	}
-	return {type:{unsigned: u, size:size}, mode:m};
+	return {type:{unsigned: u, size:size, array:anum, declared:decl}, mode:m};
 }
 
 function getPorts() {  // get Ports data from html form
 	let id="";
-	let val=0;
-	let s="";
-	let u=true;
-	let size=0;
 	let signals = new Map(); //[];
 		
-	//setLog("GetPorts");
 	[...Array(setup.nPorts)].forEach(function(_, i) {
-		id = document.getElementById("name"+(i+1)).value; // port name can be a list
-		let a = id.split(",");
-		//console.log(a);
-		a.forEach(function(name) {
+		id = document.getElementById("name"+(i+1)).value; // id name or id list
+		let idArray = id.split(",");
+		const modeStr = document.getElementById("mode"+(i+1)).value;
+		var typeStr = (document.getElementById("type"+(i+1)).value);
+		if (typeStr==="") typeStr="u1";
+
+		idArray.forEach(function(name, j) {			
 			id=name.trim();
 			if (id !== "") {
-				const m = document.getElementById("mode"+(i+1)).value;
-				const s = (document.getElementById("type"+(i+1)).value);
-				const obj = parsePorts(id, m, s);
+				let declared = (j === idArray.length-1) ? 1 : 2;				
+				const obj = parsePorts(id, modeStr, typeStr, declared);
 				if (obj!==undefined) {signals.set(id, obj);}
 			}
 		});
@@ -119,9 +168,17 @@ function save()
  parseCode(); // try to parse model
  let p ="";
  if (model) {
-	 model.ports.forEach(function (val, id) {
-		 p += "["+id+","+val.mode+","+typeToString(val.type)+"]\n";
-	 });
+	if (model.ports.size > 0) {
+		p += "[\n";	 
+		model.ports.forEach(function (val, id) {
+			if (val.type.declared===1) { // single declaration			
+				p += id+": "+val.mode+" "+typeToString(val.type)+"\n";
+			} else {
+				p += id+", ";
+			}
+		});
+		p += "]\n";
+	}
  } else {
 	 setLog("Warning: Save: model undefined!");
  }
@@ -147,45 +204,81 @@ function save()
 }
 
 function load(str, name) {
-	let lin = str.indexOf("\n");
-	let sub;
 	let newp = true;	
 	let i = 0;
+	let j = 0;
 		
 	let s1 = "";
 	let s2 = "";
 	let s3 = "";
 	
-	while(lin !== -1 && newp) {
-		sub = str.substring(0,lin);
-		
-		if (sub.charAt(0)==="[" && sub.slice(-1)==="]") {
-			let a = sub.slice(1, -1).split(",");	
-			if (a.length===3 && a[0]!=="") {
-				//parsePorts(a[0], a[1], a[2]); // test if ports data is valid
-				s1 += htmInput(i+1, "name", 6, a[0]);
-				s2 += htmInput(i+1, "mode", 1, a[1]);
-				s3 += htmInput(i+1, "type", 1, a[2]);
-				i += 1;				
-			}			
-			str = str.substr(lin+1);			
-		} else {
-			newp = false;
-		}
-		
+	//prvi podniz = "[\n"
+	let lin = 0;
+	let sub = ""
+	
+	let portsStr = str.substring(str.indexOf("[") + 1, str.indexOf("]")).trim();	
+	str = str.substring(str.indexOf("]")+1).trim();
+	console.log("***"+portsStr+"***");
+	
+	if (portsStr!=="") { //(sub.charAt(0)==="[") {
+		sub = portsStr;
+		do {
+			
+			lin = portsStr.indexOf("\n"); // poišči prvi \n in skrajšaj portsStr
+			if (lin !== -1) {
+				sub = portsStr.substring(0,lin+1).trim();
+				portsStr = portsStr.substring(lin+1);
+			}
+			else {sub = portsStr; portsStr = "";}
+			
+			j = sub.indexOf(":");
+			if (j !== -1) {
+				names = sub.substring(0,j);
+				let tmp = sub.substring(j+1).trim();
+				let modeStr = "";
+				if (tmp.startsWith("in")) {
+					modeStr = "in";
+					tmp = tmp.substring(2);
+				} else if (tmp.startsWith("out")) {
+					modeStr = "out";
+					tmp = tmp.substring(3);
+				}
+				
+				s1 += htmInput(i+1, "name", 6, names);
+				s2 += htmInput(i+1, "mode", 1, modeStr);
+				s3 += htmInput(i+1, "type", 1, tmp.trim());
+				i += 1;
+			}
+		} while (portsStr!=="");
+	
 		if (i>0) {
-			setup.nPorts = i;	
+			setup.nPorts = i;
 			document.getElementById("inName").innerHTML = s1;
 			document.getElementById("inMode").innerHTML = s2;
-			document.getElementById("inType").innerHTML = s3;	
+			document.getElementById("inType").innerHTML = s3;
+		} else {
+			setup.nPorts = 1;
+			s1 += htmInput(i+1, "name", 6, "");
+			s2 += htmInput(i+1, "mode", 1, "");
+			s3 += htmInput(i+1, "type", 1, "");
 		}
 		
-		lin = str.indexOf("\n");
 	}
 	
 	document.getElementById(textID).value = str;	
 	document.getElementById("comp_name").value = name;
 	changeSource();	
+}
+
+let saved=""; // last saved code
+
+function checkInputCode() {
+	const ta = document.getElementById(textID); 
+	if (saved !== ta.value) {
+		console.log("Input changed");
+		VHDLout();
+	}
+	saved = ta.value;
 }
 
 function parseCode() // get setup and source, run Lexer and Parse
@@ -216,7 +309,7 @@ function changeSource()
 	}
 }
 
-function clearLog(str) {
+function clearLog() {
   document.getElementById("errlog").innerHTML = "";
   document.getElementById("stat").innerHTML = "";
 }
@@ -229,7 +322,7 @@ function errTxt(str, id) {  // compose error log text, use global english
 	let s = "";
 	
 	switch (str) {
-		// parse errors
+		// parse errors (12)
 		case "exp": s = (english) ? "Expecting '"+id+"'!" : "Pričakujem '"+id+"'!"; break;
 		case "expvn": s = (english) ? "Expected signal or number!" : "Pričakujem signal ali število!"; break;
 		case "explit": s = (english) ? "Expected numeric literal!" : "Pričakujem številsko vrednost!"; break;
@@ -245,7 +338,7 @@ function errTxt(str, id) {  // compose error log text, use global english
 		case "vuse": s = (english) ? "Operator not supported in C syntax!" : "Operator ni podprt v sintaksi C!"; break;
 		// simulator errors
 		case "inf": s = (english) ? "Simulation infinite loop!" : "Simulacija v neskončni zanki!"; break;
-		// input errors
+		// input errors (9)
 		case "rsv": s = (english) ? "Illegal use of reserved word '"+id+"'!" : "Napačna raba rezervirane besede '"+id+"'!"; break;
 		case "nam": s = (english) ? "Illegal signal name '"+id+"'!" : "Neveljavno ime signala '"+id+"'!"; break;
 		case "cnam": s = (english) ? "Illegal circuit name '"+id+"'!" : "Neveljavno ime vezja '"+id+"'!"; break;
@@ -254,7 +347,8 @@ function errTxt(str, id) {  // compose error log text, use global english
 		case "mode": s = (english) ? "Unknown Mode for port '"+id+"'!" : "Neznan Mode priključka '"+id+"'!"; break;
 		case "type": s = (english) ? "Illegal Type of signal '"+id+"'!" : "Napačna oznaka tipa signala '"+id+"'!"; break;
 		case "size": s = (english) ? "Illegal size of signal '"+id+"' (1-64)!" : "Napačna velikost signala '"+id+"' (1-64)!"; break;
-		// visit model errors
+		case "decl": s = (english) ? "Signal '"+id+"' is already declared!" : "Signal '"+id+"' je ponovno deklariran!"; break;
+		// visit model errors (6)
 		case "vin": s = (english) ? "Signal '"+id+"' should be input!" : "Signal '"+id+"' mora biti vhod!"; break;
 		case "cmpsz": s = (english) ? "Compare size mismatch!" : "Neujemanje velikosti primerjave!"; break; 
 		case "cmpm": s = (english) ?  "Illegal Signed/Unsigned comparisson!" : "Neveljavna primerjava različno predznačenih vrednosti!"; break;
@@ -349,6 +443,8 @@ function removePort() {
 
 // From: http://lostsource.com/2012/11/30/selecting-textarea-line.html
 function selectLine(lineNum) {
+	if (!markErr) return false;
+	
 	const tarea = document.getElementById(textID);
     lineNum--; // array starts at 0
 	if (lineNum<0) return false;

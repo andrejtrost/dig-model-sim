@@ -43,7 +43,7 @@ function setHdlMode(v, mode) {
 	}
 }
 
-function bitVector(valStr, size) {  //convert number to VHDL binary bit vector
+function bitString(valStr, size) {  // number to VHDL binary bit string
 	const bin = Number(valStr).toString(2);	
 	const numSz = bin.length;
 	
@@ -52,6 +52,34 @@ function bitVector(valStr, size) {  //convert number to VHDL binary bit vector
 	}		
 	return "\""+bin.slice(-size)+"\""; // Number overflow
 }
+
+ // number to VHDL code: convert, resize, set format 
+ //  in: value string, type: size, unsigned and out format specifier 
+ function numVHD(numStr, objType, outFormat) {
+	if (objType.size === undefined || objType.unsigned === undefined) {
+		console.log("iErr: numVHD undefined objType!");
+		return "";
+	} 
+	const num = Number(numStr);
+	const size = objType.size;
+	const unsigned = objType.unsigned;
+	
+	if (size===1) {
+		if (num!==0 && num!==1) {
+			setLog("emitVHD: Assigned value '"+numStr+"' expected 0 or 1!");
+		}
+		if (num%2===0) {return "'0'";}
+		return "'1'";
+	}
+	
+	if (outFormat==="b" || (outFormat==="" && size <= setup.maxBinSize)) { // output string literal
+		return bitString(num, size);
+	} else {
+		if (unsigned) { return "to_unsigned("+num+", "+size+")"; }
+		return "to_signed("+num+", "+size+")";
+	}
+ }
+
 
 let Resource={IO:0, FF:1, BOOL:2, ARIT:3, CMP:4, MUX:5, IOID:6};
 
@@ -64,7 +92,6 @@ function Stat() {    // statistics and tmp values
 	let numMux = 0;
 	let io = new Set([]); // I/O variables
 	let ff = new Set([]);
-	//let item = [];        temporary save variable identifiers 2610
 	let names = new Set([]); // set of variable names
 	let pos = {x:0, y:0}; // model visit position
 	
@@ -147,6 +174,7 @@ function Stat() {    // statistics and tmp values
 
 stat = new Stat(); // global status object, resource statistics and global tmp values
 
+
 function NumConst(n, fmt) { "use strict";
 	let num = 0;
 	let value = [0, 0];
@@ -157,8 +185,7 @@ function NumConst(n, fmt) { "use strict";
 		const tmp = vec.op("-", vec.zero, [num, 0]);
 		value = [tmp[0], tmp[1]];
 		obj.size = num.toString(2).length+1;
-		obj.unsigned = false;
-//console.log("NUM value: "+value);		
+		obj.unsigned = false;	
 		if (logval) {console.log("NumConst negative!");}
 	} else {
 		num = Number(n);
@@ -209,29 +236,56 @@ function NumConst(n, fmt) { "use strict";
 	return {val, get, set, visit, emitVHD, count};
 }
 
-function Slice(v, h, l) {
+// add slice mode: 0 - range, 1 - variable index
+function Slice(v) {
 	let variable = v;
-	let high = Number(h);
-	let low = Number(l);
-	let size = high-low+1;
-	let mask = Object.assign({}, vec.mask(high-low+1));
+	let mode = 0; // -1 for index mode or high index
+	let low = 0;  
+	let size = 1;
+	let mask = Object.assign({}, vec.mask(1));
+	let index = null;
+	
+	function sliceSetup(m, n) { // range(m...n) 
+		if (m===-1) { // new: -1 = variable index
+			mode = -1;
+			size = 1; 
+		    if (type(variable).array>1) { // variable is array !
+				size = Number(type(variable).array);
+			}			
+			index = n;
+		} else {		
+			mode = Number(m);
+			low = Number(n);
+			size = mode-low+1;
+			mask = Object.assign({}, vec.mask(mode-low+1));
+		}
+	}
 	
 	function val() {
-		let v = vec.shiftRight(variable.val(), low);
+		let b = low;
+		
+		if (mode===-1) { // get one bit, TODO: check out of range
+			b = index.val()[0];
+			console.log("Index: "+b);			
+		}
+		let v = vec.shiftRight(variable.val(), b);
+		console.log("Vector [0]: "+v[0]);
 		v[0] &= mask[0];
 		v[1] &= mask[1];
 	
-		return v;
+		return v;		
 	} 
 	
 	//function setVal(v) {}  not applicable, slice is used only on expression right 
 
 	function get() { // pass the variable info
 		let v = variable.get();
-		let type = Object.assign({}, v.type);
+		let type = Object.assign({}, v.type);		
 		let hdl = Object.assign({}, v.hdl);
 		
 		type.size = size;
+		if (size===1) {type.id="bit";}
+		
 		const o = {isVar:true, name:v.name, mode:v.mode, type:type, hdl:hdl};
 		return o;
 	}
@@ -242,23 +296,26 @@ function Slice(v, h, l) {
 	
 	function visit() {
 		stat.addName(variable.get().name);
-		if (high===low) {return variable.get().name+"("+high+")";}
+		if (mode===-1) {return variable.get().name+"("+index.get().name+")";}
 		
-		return variable.get().name+"("+high+":"+low+")";
+		if (mode===low) {return variable.get().name+"("+mode+")";}
+		
+		return variable.get().name+"("+mode+":"+low+")";
 	}
 	
 	function emitVHD() {
-		if (high===low) {return variable.get().name+"("+high+")";}
-		return variable.get().name+"("+high+" downto "+low+")";
+		if (mode===-1) {return variable.get().name+"(to_integer("+index.get().name+"))";}
+		if (mode===low) {return variable.get().name+"("+mode+")";}
+		return variable.get().name+"("+mode+" downto "+low+")";
 	}
 	
 	function count() {return 1;}
 	
-	return {val, get, set, visit, emitVHD, count};
+	return {val, get, set, sliceSetup, visit, emitVHD, count};
 }
 
 function Var(s) { "use strict";
- let obj = {isVar:true, name:s, mode:"", type:{id:"sig", unsigned:true, size:0}, mask:[0, 0], hdl:{}}; // target:"" or "=" numtarget:0, 1, 
+ let obj = {isVar:true, name:s, mode:"", type:{id:"sig", unsigned:true, size:0, declared:0}, mask:[0, 0], hdl:{}}; // target:"" or "=" numtarget:0, 1, 
  let value = [0, 0];
  let nextValue = [0, 0];
  let update = false;
@@ -297,13 +354,15 @@ function Var(s) { "use strict";
 	
 	if (o.hasOwnProperty("type")) {	
 		if (o.type.hasOwnProperty("id")) {obj.type.id = o.type.id; log+=" id:"+o.type.id;}
+		if (o.type.hasOwnProperty("unsigned")) {obj.type.unsigned = o.type.unsigned; log+=" u:"+o.type.unsigned;}
 		if (o.type.hasOwnProperty("size")) {  // set size, compute type id and mask 
 			obj.type.size = o.type.size; 
 			if (o.type.size===1) {obj.type.id="bit";}			
 		    Object.assign(obj.mask, vec.mask(obj.type.size));	
 			log+=" size:"+o.type.size;
 		}
-		if (o.type.hasOwnProperty("unsigned")) {obj.type.unsigned = o.type.unsigned; log+=" u:"+o.type.unsigned;}
+		if (o.type.hasOwnProperty("declared")) {obj.type.declared = o.type.declared; log+=" dec:"+o.type.declared;}		
+		if (o.type.hasOwnProperty("array")) {obj.type.array = o.type.array; log+=" array:"+o.type.array;}	
 		if (o.type.hasOwnProperty("def")) {obj.type.def = o.type.def; log+=" def";}
 		if (logset) {console.log("Var.set type "+log);}
 	}
@@ -312,10 +371,8 @@ function Var(s) { "use strict";
 		if (o.hdl.hasOwnProperty("mode")) {obj.hdl.mode = o.hdl.mode; log+=" mode:"+o.hdl.mode;}
 		if (o.hdl.hasOwnProperty("assignments")) {obj.hdl.assignments = o.hdl.assignments; log+=" a:"+o.hdl.assignments;}
 		if (o.hdl.hasOwnProperty("assignop")) {obj.hdl.assignop = o.hdl.assignop; log+=" op"+o.hdl.assignop;}
-		if (o.hdl.hasOwnProperty("val")) {obj.hdl.val = o.hdl.val; log+=" v="+o.hdl.val;}
-		
+		if (o.hdl.hasOwnProperty("val")) {obj.hdl.val = o.hdl.val; log+=" v="+o.hdl.val;}		
 		if (o.hdl.hasOwnProperty("names")) {obj.hdl.names = o.hdl.names; log+=" names="+o.hdl.names.size;}
-		
 		if (logset) {console.log("Var.set hdl "+log);}
 	}
  }
@@ -365,8 +422,9 @@ function Var(s) { "use strict";
  return {get, set, val, setVal, setNext, next, visit, emitVHD, count};
 } // Var
 
+// obj {left:null, op:"", right:null, type:{}}
 function Op(o, optType) { "use strict";
- let obj = o; //{left:null, op:"", right:null, type:""};
+ let obj = o; 
  obj.type = optType===undefined ? {id:"", unsigned:true, size:0, format:""} : optType;
  let numOperands = 0;
  
@@ -403,12 +461,10 @@ function Op(o, optType) { "use strict";
 	  return vec.unary(obj.op, obj.right.val());
 	}
 	if (isComparisonOp(obj.op)) {
-		let max = Math.max(type(obj.left).size, type(obj.right).size);
-		let cmpType = {size:max, unsigned:type(obj.left).unsigned};
-console.log("*** CMP size="+max); //+typeToString(obj.type));
+		const max = Math.max(type(obj.left).size, type(obj.right).size);
+		const cmpType = {size:max, unsigned:type(obj.left).unsigned};
+//console.log("Op.val Comparison size="+max);
 		return vec.cmp(obj.op, obj.left.val(), obj.right.val(), cmpType);
-		
-		//obj.type);
 	}
 	if (obj.op===",") {
 		return vec.concat(obj.left.val(), obj.right.val(), type(obj.right).size);
@@ -422,16 +478,14 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 	let no = 0;   // num of operands
 
 //console.log("BEGIN Op.Visit: "+obj.op+" type: '"+obj.type.id+"' "+obj.type.size+" "+obj.type.unsigned);	
-	if (obj.op==="") {		
+	if (obj.op==="") {	// only one operand
 		str=" ";
 		if (obj.left!==null) {
 			str += obj.left.visit(statistics); 
 			no += obj.left.count();
-			obj.type.id = type(obj.left).id;//  obj.left.getType().type.id;
-			//console.log("!!!Op type: "+obj.type.id);
+			obj.type.id = type(obj.left).id;
 		}
-	} else {
-//console.log("op.visit '"+obj.op+"'");		
+	} else { // operator and operands
 		if (isComparisonOp(obj.op)) { // test comparison
 //console.log("cmp.visit1 '"+obj.op+"'");				
 			if (obj.left===null || obj.right===null) {
@@ -440,9 +494,8 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 				// check if compare sig of same type and different size or sign
 				if (type(obj.left).id === "sig" && type(obj.right).id === "sig") {
 //console.log("cmp.visit2 "+type(obj.left).size+" r:"+type(obj.right).size);
-					if (type(obj.left).size !== type(obj.right).size) {
+					if (type(obj.left).size !== type(obj.right).size) {  // illegal diff size
 						throw modelErr("cmpsz", "", stat.getPos());
-						// Illegal comparison of different size variables!
 					}
 					if (type(obj.left).unsigned !== type(obj.right).unsigned) { // Illegal signed/unsigned
 						throw modelErr("cmpm", "", stat.getPos());
@@ -470,24 +523,23 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 					}					
 				}
 			}
-			
 		}
 		
 		str = "(";
 		if (obj.left!==null) { // visit left
 			str += obj.left.visit(statistics); 
 			no += obj.left.count();
-			obj.type.id = type(obj.left).id;  // id(op) <= id(left)
+			obj.type.id = type(obj.left).id;  // get ID from left
 		}
 		str += " "+obj.op+" ";
 		if (obj.right!==null) { // visit right
 			str += obj.right.visit(statistics); 
 			no += obj.right.count();
 			id2 = type(obj.right).id;
-			if (obj.type.id==="") { // only one id set (single operand)
-				obj.type.id = id2;			
-			} else {				
-				if (obj.type.id!==id2) { // resolve different left and right id
+			if (obj.type.id==="") { // get ID from right
+				obj.type.id = id2;
+			} else { // get ID from both				
+				if (obj.type.id!==id2) { // (x,sig)->sig else (x,bit)->bit else ->num
 					if (id2==="sig") {obj.type.id = "sig";}
 					else if (id2==="bit") {
 						if (obj.type.id==="bit" || obj.type.id==="num") {obj.type.id = "bit";}
@@ -495,7 +547,7 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 						obj.type.id = obj.type.id;
 					} else {console.log("Op.visit unexpected type id! "+id2);}
 				}
-				if (obj.op===",") {obj.type.id = "sig";} // TODO: check NUM
+			/*	if (obj.op===",") {obj.type.id = "sig";} // TODO: check NUM*/
 				if (isComparisonOp(obj.op)) {obj.type.id = "bit";} // Compare is allways type: bit
 			}
 				
@@ -513,10 +565,21 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 		} 
 	}
 	numOperands = no;
-//console.log("END Op.Visit: "+obj.op+" type: '"+obj.type.id+"' "+obj.type.size+" "+obj.type.unsigned+" num"+no);
+console.log("END Op.Visit: "+obj.op+" type: '"+obj.type.id+"' "+obj.type.size+" "+obj.type.unsigned+" num"+no);
 	return str;
  }
 
+ function resizeExp(expstr, newsize, oldsize) { // resize expression
+    if (newsize === oldsize) return expstr;
+	if (Number(oldsize)===1) {
+		return "(0 => "+expstr+", others => '0')"; // (( začasno, da ne pobriše)) TODO
+	} else if (Number(newsize)===1) {
+		return "("+expstr+")(0)";
+	}
+	return "resize("+expstr+", "+newsize+")";
+	 
+ }
+ 
  function resizeVar(str, newsize, oldsize) {  // resize sig or bit
     if (newsize === oldsize) return str;
 	if (Number(oldsize)===1) {
@@ -526,24 +589,6 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 	}
 	return "resize("+str+","+newsize+")";
  } 
- 
- 
- function numToVector(numObj, size, forceSize, unsigned) {
-	const str = numObj.emitVHD();  // integer number in string
-	const fmt = numObj.get().type.format;
-	
-	if (fmt[0]==="b") {
-		const sz = (forceSize) ? size : fmt.slice(1);
-		const bin = Number(str).toString(2);
-		const numSz = bin.length;
-		if (numSz <= sz) {
-			return "\""+bin.padStart(sz, '0')+"\"";
-		}		
-		return "\""+bin.slice(-sz)+"\""; // Number overflow
-	} 
-	if (unsigned) {return "to_unsigned("+str+","+size+")";}
-	return "to_signed("+str+","+size+")";
- }
  
  function sigSign(obj, unsigned) {   // convert sig to unsigned/signed
 	if (unsigned && !type(obj).unsigned) {
@@ -570,7 +615,7 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 			console.log("A1 "+type(obj.left).size+" "+obj.type.size);
 			if (type(obj.left).size !== obj.type.size) { // left size <> op size, set by Statement.visit (NOTE)
 // check if numeric variable
-				if (type(obj.left).id==="num") {					
+				if (type(obj.left).id==="num") {
 					str += obj.left.emitVHD();
 			    } else {				
 					str += resizeVar(obj.left.emitVHD(), obj.type.size, type(obj.left).size);	
@@ -609,7 +654,7 @@ console.log("*** CMP size="+max); //+typeToString(obj.type));
 		
 			lt = type(obj.left);
 			rt = type(obj.right);
-console.log("Op.emit "+op+" left:"+lt.size+" r:"+rt.size);
+console.log("Op.emit "+op+"("+obj.type.size+") left:"+lt.size+" r:"+rt.size);
  			if (isComparisonOp(obj.op)) { // handle comparison
 				if ((lt.id==="bit") && (rt.id==="num")) {
 					return "("+obj.left.emitVHD()+" "+op+" '"+obj.right.emitVHD()+"')";
@@ -631,14 +676,15 @@ console.log("!!! Op.emit "+op+" left:"+lt.id+lt.size+" r:"+rt.id+rt.size);
 						if (num%2===0) {exp = "'0' "+op+" "+obj.right.emitVHD();}
 						else {exp = "'1' "+op+" "+obj.right.emitVHD();}
 						
-						str += resizeVar(exp, obj.type.size, 1);
+						str += resizeVar(exp, obj.type.size, 1); // TODO: resie EXP, test!
 						
 					} else if (rt.id==="sig") { // 1C
 						if (op==="&") {
 							if (lt.size===1) { // single bit
 								numStr = "'"+obj.left.emitVHD()+"'";
 							} else {
-								numStr = numToVector(obj.left, lt.size, false, rt.unsigned);								
+								const numType = {size:type(obj.left).size, unsigned:obj.type.unsigned};
+								numStr = numVHD(obj.left.emitVHD(), numType, "");								
 							}
 							exp = numStr+" "+op+" "+obj.right.emitVHD();
 							if (lt.size+rt.size !== obj.type.size) {
@@ -646,20 +692,22 @@ console.log("!!! Op.emit "+op+" left:"+lt.id+lt.size+" r:"+rt.id+rt.size);
 							} else {
 								str += exp;
 							}
-						} else if (op==="+" || op==="-") {  // sig +/- num do not require integer conversion
+						} else if (op==="+" || op==="-") {  // sig +/- num (numStr = integer)
 							numStr = obj.left.emitVHD();
 							if (obj.type.size === rt.size) {								
 								str += numStr+" "+op+" "+obj.right.emitVHD();
 							} else {  // resize only sig	
 								str += numStr+" "+op+" resize("+obj.right.emitVHD()+","+(obj.type.size)+")";
-							}					
+							}
+						} else if (op==="*") {
+							str += obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 						} else {
-							numStr = numToVector(obj.left, rt.size, true, rt.unsigned);							
+							numStr = numVHD(obj.left.emitVHD(), obj.type, "");
 							exp = numStr+" "+op+" "+obj.right.emitVHD();
 							if (rt.size === obj.type.size) {
-								str += exp;
+								str += numStr+" "+op+" "+obj.right.emitVHD();
 							} else {
-								str += resizeVar(exp, obj.type.size, 2);
+								str += numStr+" "+op+" resize("+obj.right.emitVHD()+", "+obj.type.size+")"
 							}
 						}
 					} else {
@@ -700,6 +748,9 @@ console.log("!!! Op.emit "+op+" left:"+lt.id+lt.size+" r:"+rt.id+rt.size);
 								} else {
 									str +=  "signed'(\"\" & "+obj.left.emitVHD()+") "+op+" "+obj.right.emitVHD();
 								}
+							} else if (op==="*") { // special for arithmetic op	
+								str += "(0 to "+(Number(rt.size)-1)+" => "+obj.left.emitVHD()+") and "+obj.right.emitVHD();
+
 							} else { // use aggregate for signed & unsigned
 								exp = "(0=>"+obj.left.emitVHD()+", ("+(Number(rt.size)-1)+" downto 1)=>'0') "+ 
 								op+" "+obj.right.emitVHD();
@@ -720,7 +771,8 @@ console.log("!!! Op.emit "+op+" left:"+lt.id+lt.size+" r:"+rt.id+rt.size);
 							if (rt.size===1) { // single bit
 								numStr = "'"+obj.right.emitVHD()+"'";
 							} else {
-								numStr = numToVector(obj.right, rt.size, false, lt.unsigned); // NEW
+								const numType = {size:type(obj.right).size, unsigned:obj.type.unsigned};
+								numStr = numVHD(obj.right.emitVHD(), numType, "");
 							}
 							exp = obj.left.emitVHD()+" "+op+" "+numStr;
 							if (lt.size+rt.size !== obj.type.size) {
@@ -728,22 +780,21 @@ console.log("!!! Op.emit "+op+" left:"+lt.id+lt.size+" r:"+rt.id+rt.size);
 							} else {
 								str += exp;
 							}
-						} else if (op==="+" || op==="-") {  // sig +/- num do not require integer conversion
+						} else if (op==="+" || op==="-") {  // sig +/- num = integer
 							numStr = obj.right.emitVHD();
 							if (obj.type.size === lt.size) {
 								str += obj.left.emitVHD()+" "+op+" "+numStr;
-							} else {  // resize only sig	
+							} else {  // resize only sig
 								str += "resize("+obj.left.emitVHD()+","+(obj.type.size)+") "+op+" "+numStr;
-							}					
+							}
+						} else if (op==="*") {  // sig +/- num = integer
+							str += obj.left.emitVHD()+" "+op+" "+obj.right.emitVHD();
 						} else {
-							numStr = numToVector(obj.right, lt.size, true, lt.unsigned);	
-							exp = obj.left.emitVHD()+" "+op+" "+numStr;
-							// check for size difference
-							
-							if (obj.type.size !== lt.size) { 
-								str += resizeVar(exp, obj.type.size, 2);	
+							numStr = numVHD(obj.right.emitVHD(), obj.type, "");														
+							if (obj.type.size === lt.size) { 
+								str += obj.left.emitVHD()+" "+op+" "+numStr;
 							} else {
-								str += exp;
+								str += "resize("+obj.left.emitVHD()+", "+obj.type.size+") "+op+" "+numStr;								
 							}
 						}						
 					} else if (rt.id==="bit") { // 3B  OK
@@ -765,7 +816,9 @@ console.log("!!! Op.emit "+op+" left:"+lt.id+lt.size+" r:"+rt.id+rt.size);
 								str += obj.left.emitVHD()+" "+op+bitStr;
 							} else {
 								str += resizeVar(obj.left.emitVHD(), obj.type.size, 2)+" "+op+bitStr;
-							}							
+							}
+						} else if (op==="*") { // special for arithmetic op	
+							str += obj.left.emitVHD()+" and (0 to "+(Number(lt.size)-1)+" => "+obj.right.emitVHD()+")";
 						} else { // use aggregate for signed & unsigned
 							exp = obj.left.emitVHD()+" "+op+" (0=>"+obj.right.emitVHD()+", ("+(Number(lt.size)-1)+" downto 1)=>'0')";
 
@@ -808,7 +861,7 @@ console.log("sig-sig L-R:"+lt.size+"-"+rt.size+" obj"+obj.type.size);
 							if (tmpSize === obj.type.size) { 
 								str += exp;
 							} else {
-								str += resizeVar(exp, obj.type.size, 2);
+								str += resizeExp(exp, obj.type.size, tmpSize); // 25.1. correct for 2 bits
 							}
 						}
 					} else {
@@ -823,6 +876,7 @@ console.log("sig-sig L-R:"+lt.size+"-"+rt.size+" obj"+obj.type.size);
 			}
 		}
 	}
+console.log("%op: '"+str+"'");	
 	return str;
  }
  
@@ -873,15 +927,11 @@ function Statement(t) {  "use strict";
 	function val(firstCycle, numCycle) {
 		let change = false;
 		
-		if (obj.id==="=" || (firstCycle && (obj.id==="<="))) {
+		if (obj.id==="=" || (firstCycle && numCycle>0 && (obj.id==="<="))) { // AT 4.12.
 			let res = obj.expr.val(); 
 			if (logval) {
 				console.log("St.val "+obj.target.get().name+" = "+vec.hex(res)+", old:"+vec.hex(obj.target.val()));
-			}
-			// special: cycle 0, do not evaluate seq number assignment (initial reset)
-			if (numCycle===0 && (obj.id==="<=") && type(obj.expr).id==="num") {
-				return false;
-			}
+			}			
 			
 			return obj.target.setNext(res);  // true, if value changed
 		}
@@ -891,12 +941,12 @@ function Statement(t) {  "use strict";
 			if (!vec.isZero(b)) { 
 				if (logval) {console.log("St.val if "+obj.expr.visit()+": true");}
 				obj.ifBlock.statements.forEach(function(st) {
-					if (st.val(firstCycle)) {change = true;}
+					if (st.val(firstCycle, numCycle)) {change = true;}
 				});
 			} else if (obj.elseBlock!==null) { // else exists
 			    if (logval) {console.log("St.val if "+obj.expr.visit()+": false");}
 				obj.elseBlock.statements.forEach(function(st) {
-					if (st.val(firstCycle)) {change = true;}
+					if (st.val(firstCycle, numCycle)) {change = true;}
 				});			
 			}
 			return change;
@@ -940,12 +990,18 @@ function Statement(t) {  "use strict";
 						nameSet.add(id);                // add ID to current name set						
 					}
 					
-					obj.target.set({hdl: {names: nameSet}}); // add set of names to target
+					obj.target.set({hdl: {names: nameSet}}); // add set of names to target					
 				}
 				
 				if (type(obj.target).size !== type(obj.expr).size) {  // NOTE: Resize assignment, correct expr op
-					if (log) {console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(obj.expr).size);}
-					obj.expr.set({type: {size: type(obj.target).size}}); //%%%%%%%%%%%%%%%%%%%%%%%%
+					if (isComparisonOp(obj.expr.getOp())) {
+						if (log) {console.log("Statement.visit: size difference comparisson");}
+					} else if (obj.expr.getOp()==="*"){
+						if (log) {console.log("Statement.visit: size difference multiplication");}
+					} else {
+						if (log) {console.log("Statement.visit: size difference "+type(obj.target).size+" "+type(obj.expr).size);}
+						obj.expr.set({type: {size: type(obj.target).size}});
+					}
 				}
 				
 			} else {  // second pass
@@ -1065,7 +1121,6 @@ function Statement(t) {  "use strict";
 console.log("St.emit left:"+lsz+" r:"+rsz);			
 			if (obj.expr.count()===1) { // single item assignment (num, sig or bit)
 				let v = null;
-
 				if (obj.expr.getOp()==="") {
 					v = obj.expr.getLeft();
 				} else {
@@ -1073,25 +1128,9 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 				}
 									
 				if (type(v).id==="num") { // special code for number assignment
-						if (lsz===1) {								
-							num = Number(expStr);
-							if (num!==0 && num!==1) {
-								setLog("emitVHD: Assigned number expected 0 or 1!");
-							}
-							if (num%2===0) {str += "'0'";}
-							else {str += "'1'";}
-						} else {
-							if (type(obj.target).unsigned) {			
-								if (!type(v).unsigned) { // signed int to unsigned, special case
-									const mask = vec.mask(lsz);							
-									str += "to_unsigned("+(v.val()[0] & mask[0])+","+lsz+")";
-								} else {									
-									str += "to_unsigned("+expStr+","+lsz+")";
-								}
-							} else {
-								str += "to_signed("+expStr+","+lsz+")";
-							}
-						}
+						const fmt=(type(v).format===undefined) ? "" : type(v).format[0];						
+						str += numVHD(expStr, type(obj.target), fmt);
+						// TODO: check signed value to unsigned target
 				} else {	
 					if (lsz!==rsz) {   // signal, different size
 						if (lsz===1) { // bit <- sig 
@@ -1110,27 +1149,19 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 					} else {
 						str += expStr;
 					}
-				}				
+				}	
+				// 25.1. Check - do not slice ()
 			} else { // expression assignment
-				// TODO 1 bit !
 				if (type(obj.expr).id==="num") { // special code for number assignment
-						if (lsz===1) {								
-							num = Number(expStr);
-							if (num!==0 && num!==1) {
-								setLog("emitVHD: Assigned number expected 0 or 1!");
-							}							
-							if (num%2===0) {str += "'0'";}
-							else {str += "'1'";}								
-						} else {
-							if (type(obj.target).unsigned) {
-								str += "to_unsigned("+expStr+","+lsz+")";
-							} else {
-								str += "to_signed("+expStr+","+lsz+")";
-							}
-						}
+						str += numVHD(expStr, type(obj.target), "d");						
 				} else {					
-					if (lsz!==rsz) {
-						expStr = "resize("+expStr+","+lsz+")";
+					if (lsz!==rsz) { // TODO 1 bit !
+						// if lsz = 1 not applicable
+						if (rsz===1) {
+							expStr = "((0 => "+expStr+", others => '0'))"; 
+						} else {
+							expStr = "resize("+expStr+","+lsz+")";
+						}
 					}
 					if (type(obj.target).unsigned && !type(obj.expr).unsigned) {
 						str += "unsigned("+expStr+")";
@@ -1140,12 +1171,10 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 						str += expStr;
 					}
 				}
-			}	
 //console.log("Slice ()"+str);
-			if (str.slice(0,1)==="(" && str.slice(-1)===")") {
-				
-				str = str.slice(1, -1);
-			}
+				if (str.slice(0,1)==="(" && str.slice(-1)===")") {str = str.slice(1, -1);}				
+			}	
+
 			str = spaces + obj.target.visit()+" <= "+str+";\n";
 			
 			//str += "\n";
@@ -1162,7 +1191,7 @@ console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);
 					if (obj.els && obj.isCase) { 
 						str += spaces + "case "+obj.expr.getLeft().emitVHD()+" is\n";
 						const bitSize = type(obj.expr.getLeft()).size;						
-						let bv = bitVector(obj.expr.getRight().emitVHD(), bitSize);						
+						let bv = bitString(obj.expr.getRight().emitVHD(), bitSize);						
 						str += spaces + " when "+bv+" =>\n";
 					} else { 						
 						str += spaces + "if "+condStr+" then\n"; 						
@@ -1170,7 +1199,7 @@ console.log("IFCS +cp="+obj.combProc+" +sp="+obj.seqProc);
 				} else {            // continue conditional (elsif or when)					
 					if (doCase) {
 						const bitSize = type(obj.expr.getLeft()).size;						
-						let bv = bitVector(obj.expr.getRight().emitVHD(), bitSize);						
+						let bv = bitString(obj.expr.getRight().emitVHD(), bitSize);						
 						str += " when "+bv+" =>\n";
 					} else {
 						str += "if "+condStr+" then\n";

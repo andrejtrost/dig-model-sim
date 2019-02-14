@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.20";
+const parseVersion = "V.22";
 const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -28,6 +28,10 @@ function Circuit() {
 	const er = (english) ? "Error: " : "Napaka: ";
 	return "<span style='color: red;'>"+er+"</span>"+errTxt(str, id);
  } 
+ 
+ function setPorts(id, obj) {
+	 ports.set(id, obj);
+ }
  
  function getVar(id, returnNull) {  // get or create new, if not returnNull
      //console.log("Cir.getVar "+id);
@@ -155,7 +159,7 @@ function Circuit() {
 	 return srcChanged;
  }
  
- return {vars, ports, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq, changed}; 
+ return {vars, ports, setPorts, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq, changed}; 
 }
 
 
@@ -186,23 +190,35 @@ function Parse(k) {
 			if (peek().id === "(") { // variable slice
 				consume();
 				t=peek();
-				if (!t.isNum()) {throw parseErr("explit");}
-				let num = consume().id;
-				let num2 = num;
-				t=peek();
-				if (t.id===":") { 
-					consume(); t=peek();
-					if (!t.isNum()) {throw parseErr("explit");}
-					num2 = consume().id;
+				if (t.isID()) { // slice with index variable
+					console.log("Special");
+					let index = circ.getVar(consume().id);
 					t=peek();
+					if (t.id===")") { consume(); }
+					else {throw parseErr("exp",")");}
+					v = new Slice(v);
+					v.sliceSetup(-1, index);					
+				} else if (t.isNum()) {
+					let num = Number(consume().id);
+					let num2 = num;
+					t=peek();
+					if (t.id===":") { 
+						consume(); t=peek();
+						if (!t.isNum()) {throw parseErr("explit");}
+						num2 = Number(consume().id);
+						t=peek();
+					}
+					
+					if (t.id===")") { consume(); }
+					else {throw parseErr("exp",")");} // Expected ) 
+					if (!(num>=num2)) {throw parseErr("slice",")");}
+					if (num>=type(v).size) {throw parseErr("slice",")");}
+					
+					v= new Slice(v); // change
+					v.sliceSetup(num, num2);
+				} else {
+					throw parseErr("explit");
 				}
-				
-				if (t.id===")") { consume(); }
-				else {throw parseErr("exp",")");} // Expected ) 
-				if (!(num>=num2)) {throw parseErr("slice",")");}
-				if (num>=type(v).size) {throw parseErr("slice",")");}
-				
-				v= new Slice(v,num,num2);
 			}
 			
 			n.left(v);
@@ -275,6 +291,8 @@ function Parse(k) {
 			if (sz1===1 && sz2===1) { // for 1 bit change to AND
 				f.op("&");
 				sz = 1; 
+			} else if (sz1===1 || sz2===1) { // one operand is bit
+			    sz = sz1 + sz2 - 1;
 			}
 			
 			let u1 = type(f).unsigned;
@@ -712,20 +730,62 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		
 		if (t.isID()) { // identifier
 		  let pos = t.pos();
-		  let id = peek().id;
+		  let id = consume().id; // save first identifier
+		  let delimiter = peek().id;
 		  
-		  let v = circ.getVar(id);   // get output var		
+		  if (peek().isAssign()) {  // expect assignment
+			let v = circ.getVar(id);   // get output var		
 			if (mode(v)==="in") {
 				throw parseErr("tin", id); //Assignment target: '"+id+"' is input signal!");
 			}			  
-		  consume();
-		  
-		  if (peek().isAssign()) {  // expect assignment		  
+			
 			let op = consume().id;
 			statement = parseAssign(v, op, pos); // return statement or undefined
 						
 			if (op==="<=") {circ.setSeq(true);}
-			
+		  } else if (delimiter.match(/^(:|,)$/)){ // parse declaration: sig: or sig, 
+			  consume();
+			  
+			  let varid = new Array();
+			  varid.push(id);
+			  
+			  while (delimiter===",") {				  
+				if (peek().isID()) {
+					id = consume().id;
+					console.log("LIST IDENT: "+id);
+					varid.push(id);					
+					delimiter = consume().id;
+					console.log("NEXT: "+delimiter);
+				} else if (delimiter!==":") {
+					delimiter = "?";
+					console.log("EEE");
+				}
+				
+				
+			  }
+			  
+			  let vmode = "";
+			  let tmp = peek().id;
+			  
+			  if (tmp==="in" || tmp==="out") { // read signal mode
+				vmode = consume().id;
+				tmp = peek().id;
+			  }
+			  
+			  tmp = consume().id;
+//			  console.log(id + ":" + peek().id + " "+tmp);
+			  let declared = 1;
+			  
+			  varid.forEach(function (ident, j) {
+				  declared = (j === varid.length-1) ? 1 : 2;				  
+				  let obj = parsePorts(ident, vmode, tmp, declared);				  
+				  // check if not already in ports
+				  if (circ.ports.has(ident)) {throw parseErr("decl", ident);}
+				  circ.setPorts(ident, obj);	
+				  
+				  if (circ.vars.has(ident)) {throw parseErr("decl", ident);}
+				  circ.getVar(ident);
+			  });
 		  } else { 
 			throw parseErr("exp", "=");  //"Unexpected token: '"+peek().id+"'!"
 		  }		  
@@ -784,46 +844,8 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	  	  
 	  let logStr=circ.visit(1); // visit, first pass
 	  
-	  let numUndeclared;
 	  let v;
 	  let mod;
-	  let foundUndeclared = false; // find only one set of undeclared variables
-  
-	  circ.vars.forEach(function (val, id) {
-		  numUndeclared=0;
-		  let nameList = [];
-		  if (!foundUndeclared && hdl(val).names!==undefined) {
-			// count undeclared used as inputs
-			hdl(val).names.forEach(function (varName) {
-				v = circ.getVar(varName, true);
-				if (v!==null) {					
-					mod = mode(v);			
-					if (mod==="" && hdl(v).mode==="in") {
-						numUndeclared += 1;
-						nameList.push(varName);
-					}	
-				}
-			});
-			if (numUndeclared>=2) { // two or more undeclared convert to enum!!
-				foundUndeclared = true;
-				nameList.sort();
-				setLog("Enumerating variables: "+nameList);
-				let enumVal = 0;
-				nameList.forEach(function (varName) {
-					v = circ.getVar(varName, true);
-					v.set({hdl: {mode: "const"}});
-					v.set({hdl: {val: enumVal}});
-					v.setVal(vec.parse(enumVal));
-					
-					enumVal += 1;
-				});
-			}
-//console.log("**"+id+" "+hdl(val).mode+" names: "+hdl(val).names.size);			
-		  }
-			
-	  });
-	  
-	  
 	  
 	  stat.getSet(Resource.FF).forEach(function(id) {  // calculate number of FFs
 	      stat.incNum(type(circ.getVar(id)).size, Resource.FF);
@@ -831,7 +853,8 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	  
 	  // check ports usage, note: in used as out checked at assignment visit,
 	  //   out used as inout solved at 2nd pass visit
-	  circ.ports.forEach(function (val, id) { 
+	  circ.ports.forEach(function (val, id) {
+console.log("***"+ id+ ": "+val.decl);		  
 		v = circ.getVar(id, true);
 		if (v!==null) {
 			mod = mode(v);			
@@ -844,28 +867,107 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	  let whenElseList=[]; // possible traget variables for when...else, TODO
 	  
 	  // vars check and I/O resource usage
+	  // TODO: allow multiple stateVars
+	  let undeclaredIn = 0;
+	  let undeclareIds = "";
+	  let stateVar = "";
+	  let nameList = [];
+	  
 	  circ.vars.forEach(function (val, id) {
 		var mod = mode(val); //val.getMode();
 		var mod1 = hdl(val).mode;
 		if (mod1===undefined) {mod1 = "";}
 		if (mod==="") { // test internal signals			
-			if (mod1==="" || mod1==="out") {
-				// TODO: remove
-				setLog("Note: unused variable: "+id);
+			if (mod1==="" || mod1==="out") {			
+				if (!circ.ports.has(id)) {
+					setLog("Note: convert unused: "+id+" to output");										
+					let obj = parsePorts(id, "out", "u1", 1);		// TODO: get type		  				  
+					circ.setPorts(id, obj);	
+					const v = circ.getVar(id, true); // TODO v === val ??
+					v.set({mode: "out"});
+					
+				} else {
+					setLog("Note: unused variable: "+id);
+				}
 			}
+			
 			if (mod1==="in") {
-				setLog("Note: variable: "+id+" should be declared as input!");
+				if (!circ.ports.has(id)) {
+					setLog("Note: convert unused: "+id+" to input");										
+					let obj = parsePorts(id, "in", "u1", 1);		// TODO: get type		  				  
+					circ.setPorts(id, obj);
+					const v = circ.getVar(id, true); // TODO v === val ??
+					v.set({mode: "in"});					
+				} else {
+					if (undeclareIds==="") {undeclareIds = id;}
+					else {undeclareIds += ","+id;}
+					
+					//setLog("Note: variable: "+id+" should be declared as input!");
+					undeclaredIn += 1;
+				}
 			}			
-		}		
+		}
+		
 		if (mod==="in" || mod==="out") {
 			stat.incNum(type(val).size, Resource.IO);
 		}
 		if (hdl(val).assignments>1) {
 			stat.incNum(1, Resource.MUX);
+		
+			// search for stateVar: <=, only undefined input variable assigments 
+			if (hdl(val).assignop==="<=" && hdl(val).names.size>1) {
+				let test = 0;
+				hdl(val).names.forEach(function (varName) { // browse all variable names
+					vn = circ.getVar(varName, true);
+					if (vn!==null) {					
+						mod = mode(vn);			
+						if (mod==="" && hdl(vn).mode==="in") {
+							if (test===0) {nameList = [];}
+							test += 1;
+							nameList.push(varName);
+						} else {
+							test = 0;
+							
+						}
+					}
+				});
+					
+				//const firstName = hdl(val).names.values().next();
+				//setLog("Check:"+firstName.value );
+				//const v1 = circ.getVar(hdl(val).names[0], true);
+				//if (mode(v1)==="" && hdl(v1).mode==="in") {
+				if (test>0) {
+					stateVar = id;
+				}
+				//}
+			}			
 		}
 		// when...else ?
-		if (hdl(val).assignop==="=" && hdl(val).assignments===2) {whenElseList.push(id);}			
+		if (hdl(val).assignop==="=" && hdl(val).assignments===2) {whenElseList.push(id);}
+
+		
+		
 	  });
+
+	if (undeclaredIn>0) {
+		setLog("Note: variable: "+undeclareIds+" should be declared as input!");
+	}
+	// enumerate stateVar
+	
+	
+	if (stateVar!="") {
+		nameList.sort();
+		setLog("Enumerating variables: "+nameList);
+		let enumVal = 0;
+		nameList.forEach(function (varName) {
+			v = circ.getVar(varName, true);
+			v.set({hdl: {mode: "const"}});
+			v.set({hdl: {val: enumVal}});
+			v.setVal(vec.parse(enumVal));
+			
+			enumVal += 1;
+		});
+	}
 	  
 //console.log(whenElseList);  
 	  whenElseList.forEach(function(id) {		  
@@ -896,6 +998,14 @@ console.log("***TODO*** found "+id+" in IF-ELSE block");
 		//console.log(logStr);
 		
 		console.log("Sequential: "+circ.getSeq());
+		
+		/*let str = "";
+		circ.ports.forEach(function (val, id) {
+			str+=id+", ";
+		});			
+		console.log("Ports: "+str);	*/
+		
+
 		console.log("Signals: ");
 		circ.vars.forEach(function(v) {
 			sigmode = ",";

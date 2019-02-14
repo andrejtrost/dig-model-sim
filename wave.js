@@ -207,7 +207,7 @@ function graf_refresh()  /* posodobi tabeli ports[] in signals[][], prikaz zoom(
 	if (model===undefined) {return;} // return if the model is invalid
 	
 	// preveri ali so spremembe v ports[]
-	var s = model.ports; // getPorts();
+	var s = getPorts();
 	var n = 0;
 	var ime = "";
 	var tip_sig = "unsigned";
@@ -504,11 +504,11 @@ function graf_plot()  //izris vseh signalov v razpredelnici
 		var vnc = vns; //vertikala signala nizkega nivoja
 		var x1 = 100;
 			
-		ctx.moveTo(x1,vnc);
+		ctx.moveTo(x1,vvc);
 		
 		for (var n = nstart; n < nend; n++) // n-ti urni cikel
 		{			
-			ctx.lineTo(x1,vvc);
+			ctx.lineTo(x1,vvc);			
 			ctx.lineTo(x1+wave.dx()/2,vvc);
 			ctx.lineTo(x1+wave.dx()/2,vnc);
 			ctx.lineTo(x1+wave.dx(),vnc);

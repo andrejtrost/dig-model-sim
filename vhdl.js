@@ -5,7 +5,7 @@ function makeBold(input) {
  const keywords=["library","use","all","entity","port","in","out","is","begin",
  "end", "architecture","downto","of", "signal","constant","process",
  "if", "then", "else", "elsif", "null", "case", "when", "others", 
- "map", "time", "wait", "for"];
+ "map", "time", "wait", "for", "and", "or", "not", "xor"];
  return input.replace(new RegExp('(\\b)(' + keywords.join('|') + ')(\\b)','ig'), '$1<b class="w3-text-indigo">$2</b>$3');
 }
 
@@ -30,7 +30,7 @@ function initValue(variable, value)
 	if (Number(value)%2 === 1) {str += "'1'";}
 	else {str += "'0'";}
   } else {
-	if (type(variable).size<9) {  // currently use binary for vectors < 9 bits
+	if (type(variable).size <= setup.maxBinSize) {
 		const bin = Number(value).toString(2);
 		const numSz = bin.length;
 		if (numSz <= size) {
@@ -39,16 +39,21 @@ function initValue(variable, value)
 			str += "\""+bin.slice(-size)+"\"";
 		}
 	} else {
-		if (type(variable).unsigned) {
-			str += "to_unsigned("+value+","+type(variable).size+")";
+		if (setup.vhdl2008) {
+			str += type(variable).size+"D\""+value+"\"";
 		} else {
-			str += "to_signed("+value+","+type(variable).size+")";			
+			if (type(variable).unsigned) {
+				str += "to_unsigned("+value+","+type(variable).size+")";
+			} else {
+				str += "to_signed("+value+","+type(variable).size+")";			
+			}
 		}
 	}
   }
   return str;
 }
 
+// VHDL ports and signals code
 function VHDLports() {
   if (model===undefined) {return;}
   var namepatt = /^\w+$/
@@ -69,20 +74,27 @@ function VHDLports() {
   
   s += " port (\n";
   if (model.getSeq()) s += "   clk : in std_logic;\n";
-  let first=true;
+  let prev = 1; // 1 = first port declaration
   
-  model.vars.forEach(function (val, id) {
+  model.ports.forEach(function (val, id) {
 	var tip = "unsigned";
-	var mod = mode(val); //val.getMode();
+	var mod = val.mode;
 	if (mod==="in" || mod==="out") {
-		if (type(val).unsigned===false) tip = "signed";
-		if (type(val).size===1) {tip = "std_logic";}
+		if (val.type.unsigned===false) tip = "signed";
+		if (val.type.size===1) {tip = "std_logic";}
 			
-		if (first) { first=false; }
-		else {s += ";\n"; }
-		s += "   "+ val.get().name + " " + ":" + " " + mode(val) + " " + tip;    	
-		if (type(val).size>1) {
-		  s += range(type(val).size); 
+		// add separators to finish previous declaration
+		if (prev===0) { s += ";\n   "; } 
+		else if (prev===1) { s += "   "; } 
+		else if (prev===2) { s += ", "; }
+						
+		if (val.type.declared===1) { // single declaration (1) or continue list
+			s += id + " " + ":" + " " + val.mode + " " + tip;
+			if (val.type.size>1) {s += range(val.type.size);}
+			prev = 0;					
+	    } else {
+			s += id;
+			prev = 2;
 		}
 	}
   });
@@ -106,9 +118,9 @@ function VHDLports() {
 		if (type(val).size>1) {
 		  s += range(type(val).size);
 		}
-		if (hdl(val).mode === "const") {			
+		if (hdl(val).mode === "const") {
 			s += " := "+initValue(val, hdl(val).val)+";\n";
-		} else if (hdl(val).assignop==="<=") {	// initial register value		
+		} else if (hdl(val).assignop==="<=") {	// initial register value
 			s += " := "+initValue(val, 0)+";\n";
 		} else {		
 			s += ";\n";
@@ -279,21 +291,22 @@ function TBout() {
   s += "\narchitecture sim of" + " " + comp_name + "_tb " + "is" + "\n";
   
   if (isSequential()) {
-	s += " signal clk : std_logic:= '0';\n"
+	s += " signal clk : std_logic:= '1';\n"
   }
     
   let first=true;
-  model.vars.forEach(function (val, id) {
+  // AT 4.12.
+  model.ports.forEach(function (val, id) {
 	var tip = "unsigned";
-	var mod = mode(val); //val.getMode();
+	var mod = val.mode; //val.getMode();
 	if (mod==="in" || mod==="out") {
-		if (type(val).unsigned===false) tip = "signed";
-		if (type(val).size===1) {tip = "std_logic";}
+		if (val.type.unsigned===false) tip = "signed";
+		if (val.type.size===1) {tip = "std_logic";}
 			
 		s += " signal "; 
-		s += val.get().name + " " + ": " + tip;
-		if (type(val).size>1) {
-		  s += range(type(val).size); 
+		s += id + " " + ": " + tip;
+		if (val.type.size>1) {
+		  s += range(val.type.size); 
 		}
 		s += ";\n";
 	}
@@ -305,16 +318,17 @@ function TBout() {
   s += "begin\n" + "\nuut: entity <b class='w3-text-brown'>work</b>."+comp_name+" port map(\n";
     
   if (isSequential()) s += "     clk => clk,\n"
-  model.vars.forEach(function (val, id) {
+  model.ports.forEach(function (val, id) {
+  //model.vars.forEach(function (val, id) {
 	var tip = "unsigned";
-	var mod = mode(val); //val.getMode();
+	var mod = val.mode; //val.getMode();
 	if (mod==="in" || mod==="out") {
-		if (type(val).unsigned===false) tip = "signed";
-		if (type(val).size===1) {tip = "std_logic";}
+		if (val.type.unsigned===false) tip = "signed";
+		if (val.type.size===1) {tip = "std_logic";}
 		if (first) { first=false; }
 		else {s += ",\n"; }
 		
-		s += "     "+val.get().name+" => "+val.get().name;
+		s += "     "+id+" => "+id;
 	}
   });   
   s += "\n);\n";
@@ -324,7 +338,7 @@ function TBout() {
 	s += "clk_gen: process\nbegin\n clk <= '1';  wait for T/2;\n clk <= '0';  wait for T/2;\nend process;\n";
   }
 
-  s += "\nstim_proc: process\nbegin\n wait for 0.5 ns;\n\n";  
+  s += "\nstim_proc: process\nbegin\n";  
   
   const cycles = getCycles();
   const vrstice = ports.length;
