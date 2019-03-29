@@ -2,12 +2,13 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.22";
+const parseVersion = "V.24";
 const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
 
 let globPrevStatement="";
+let globAssignSize=0; //29.3.
 
 let vec=new Vector();
 let model = undefined;
@@ -342,7 +343,9 @@ function Parse(k) {
 			
 			const sz1 = type(x.getLeft()).size;  // compare left & right 
 			const sz2 = type(x.getRight()).size;
-			let sz = Math.max(sz1, sz2)+1;  // allow carry
+			let sz = Math.max(sz1, sz2);  
+			if (globAssignSize >= sz+1) {sz += 1;} // allow carry if assigment size fits
+			
 			if (o===",") {sz = sz1+sz2;}
 			
 			let u1 = type(x.getLeft()).unsigned;
@@ -443,7 +446,7 @@ function Parse(k) {
 			if (e.getOp()==="") { // prazna operacija
 				e.op(o);
 				// check for id ==
-				//if (o==="==" ) {
+				//if (o==="==" ) { // isVar ne deluje za slice!
 				//	if (e.getLeft().get().isVar) {isVar = true;}
 				//}
 			
@@ -593,7 +596,7 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 		a.set({pos: pos});				
 		a.set({level: Number(circ.getBlok().get().level)});		
 		stat.setPos(pos);
-		
+		globAssignSize = type(v).size;
 		// opnode
 		let node = new Op({op:"", left:null, right:null});		
 		node = expression(node); //exprList(node);

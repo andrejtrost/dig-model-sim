@@ -147,19 +147,23 @@ console.log("VHDLcomb: "+hdl(st.get().target).assignments);
 		}
 	});
 	
+	
 	if (proc) { // need comb process
-		s +="\nprocess(all)\nbegin\n";
+	    s1 = "";
+		process.initList();
 		b.statements.forEach(function(st) {
 			if (!st.get().translated) {
 				if (st.get().id==="=") {
-					s += st.emitVHD(2, true);
+					s1 += st.emitVHD(2, true);
 				} else if (st.get().id==="if") {
-					s += st.emitVHD(2, true);
+					s1 += st.emitVHD(2, true);
 				}
 			}
 		});
-
-	
+		
+		if (setup.vhdl2008) { s +="\nprocess(all)\nbegin\n"; }
+		else { s+= "\nprocess("+process.sensList()+")\nbegin\n"; }
+		s+=s1;
 		s+= "end process;\n";
 	}
 	
@@ -295,10 +299,10 @@ function TBout() {
   }
     
   let first=true;
-  // AT 4.12.
+  
   model.ports.forEach(function (val, id) {
 	var tip = "unsigned";
-	var mod = val.mode; //val.getMode();
+	var mod = val.mode; 
 	if (mod==="in" || mod==="out") {
 		if (val.type.unsigned===false) tip = "signed";
 		if (val.type.size===1) {tip = "std_logic";}
@@ -308,20 +312,20 @@ function TBout() {
 		if (val.type.size>1) {
 		  s += range(val.type.size); 
 		}
-		s += ";\n";
+		if (mod==="in") {
+			if (val.type.size===1) {s += " := '0';\n";}
+			else {s += " := (others=>'0');\n";}
+		} else {s += ";\n";}
 	}
   });
-  //s += "\n";    
-
   
   s += " constant T : time := " + clk_per + " ns;\n";
   s += "begin\n" + "\nuut: entity <b class='w3-text-brown'>work</b>."+comp_name+" port map(\n";
     
   if (isSequential()) s += "     clk => clk,\n"
   model.ports.forEach(function (val, id) {
-  //model.vars.forEach(function (val, id) {
 	var tip = "unsigned";
-	var mod = val.mode; //val.getMode();
+	var mod = val.mode;
 	if (mod==="in" || mod==="out") {
 		if (val.type.unsigned===false) tip = "signed";
 		if (val.type.size===1) {tip = "std_logic";}
@@ -339,7 +343,8 @@ function TBout() {
   }
 
   s += "\nstim_proc: process\nbegin\n";  
-  
+  if (isSequential()) { s += " wait for T/20;\n"; }
+	  
   const cycles = getCycles();
   const vrstice = ports.length;
   let repeat = 0;

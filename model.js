@@ -83,6 +83,18 @@ function bitString(valStr, size) {  // number to VHDL binary bit string
 
 let Resource={IO:0, FF:1, BOOL:2, ARIT:3, CMP:4, MUX:5, IOID:6};
 
+function Process() {    // process data
+	let sensitivity = new Set([]);
+	
+	function initList(o) {sensitivity=new Set([]);}
+	function addVar(o) {sensitivity.add(o);}
+	function sensList() {
+		return Array.from(sensitivity).join(',')
+	}
+	return {initList, addVar, sensList};
+}
+process = new Process();
+	
 function Stat() {    // statistics and tmp values
 	let numIO = 0;
 	let numFF = 0;
@@ -278,7 +290,7 @@ function Slice(v) {
 	
 	//function setVal(v) {}  not applicable, slice is used only on expression right 
 
-	function get() { // pass the variable info
+	function get() { // pass the variable info, isVar=false
 		let v = variable.get();
 		let type = Object.assign({}, v.type);		
 		let hdl = Object.assign({}, v.hdl);
@@ -286,7 +298,7 @@ function Slice(v) {
 		type.size = size;
 		if (size===1) {type.id="bit";}
 		
-		const o = {isVar:true, name:v.name, mode:v.mode, type:type, hdl:hdl};
+		const o = {isVar:false, name:v.name, mode:v.mode, type:type, hdl:hdl};
 		return o;
 	}
 	
@@ -304,6 +316,7 @@ function Slice(v) {
 	}
 	
 	function emitVHD() {
+		stat.addName(variable.get().name);//12.3.
 		if (mode===-1) {return variable.get().name+"(to_integer("+index.get().name+"))";}
 		if (mode===low) {return variable.get().name+"("+mode+")";}
 		return variable.get().name+"("+mode+" downto "+low+")";
@@ -416,7 +429,10 @@ function Var(s) { "use strict";
 	 stat.addName(obj.name);
 	 return obj.name;
  }
- function emitVHD() {return obj.name;}
+ function emitVHD() {
+	 stat.addName(obj.name);
+	 return obj.name;
+}
  function count() {return 1;}
 
  return {get, set, val, setVal, setNext, next, visit, emitVHD, count};
@@ -979,8 +995,8 @@ function Statement(t) {  "use strict";
 				if (obj.expr === null) {str+="?";} 
 				else {				
 					stat.initNames();
-					str += obj.expr.visit();  // visit expression, count operands, set var mode = in				
-
+					str += obj.expr.visit();  // visit expression, count operands, set var mode = in
+										
 					let nameSet = new Set([]);
 					if (obj.target.get().hdl.hasOwnProperty("names")) { // get existing names
 						nameSet = obj.target.get().hdl.names;
@@ -1081,6 +1097,7 @@ function Statement(t) {  "use strict";
 					let st0 = obj.elseBlock.statements[0];
 					if (st0!==undefined) {
 						const obj=st0.get().elsLink;
+						
 						if (obj!==undefined && st0.get().id==="if") {
 //console.log("PASS2: IF: "+st0.get().expr.visit(1)+" > "+st0.get().conEqualId+" < "+st0.get().elsLink.conEqualId);
 							if (st0.get().elsLink.conEqualId!==undefined && st0.get().elsLink.conEqualId!=="") {
@@ -1111,11 +1128,16 @@ function Statement(t) {  "use strict";
 		let str = "";
 		let spaces = " ".repeat(indent)+" ".repeat(3*Number(obj.level));
 		let expStr = "";
-		let num = 0;
+		let num = 0;		
 		if ((obj.id==="=" && isComb) || (obj.id==="<=" && !isComb)) {	// assignment
 			if (obj.expr === null) {return "?";} // unexpected empty expression
-						
+					
+			stat.initNames(); //12.3.
 			expStr = obj.expr.emitVHD();
+			for (const id of stat.getNames()) { // 12.3.
+						process.addVar(id);
+			}
+			
 			let lsz = type(obj.target).size;
 			let rsz = type(obj.expr).size;
 console.log("St.emit left:"+lsz+" r:"+rsz);			
@@ -1179,8 +1201,12 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 			
 			//str += "\n";
 		} else if (obj.id==="if") {  // if statement, check if belongs to comb
+			stat.initNames(); //12.3.
 			let condStr = obj.expr.emitVHD(); // get condition and strip spaces
 			if (condStr.slice(0,1)==="(" && condStr.slice(-1)===")") {condStr = condStr.slice(1, -1);}
+			for (const id of stat.getNames()) { // 12.3.
+						process.addVar(id);
+			}
 		
 			let doCase = obj.isCase || (obj.elsLink!==undefined && obj.elsLink.isCase) ? true : false;
 console.log("Model: isCase:"+obj.isCase+" "+(obj.elsLink!==undefined && obj.elsLink.isCase));			

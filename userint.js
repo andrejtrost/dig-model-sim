@@ -168,9 +168,11 @@ function save()
  parseCode(); // try to parse model
  let p ="";
  if (model) {
-	if (model.ports.size > 0) {
+	ptable = getPorts();
+	 
+	if (ptable.size > 0) {
 		p += "[\n";	 
-		model.ports.forEach(function (val, id) {
+		ptable.forEach(function (val, id) {
 			if (val.type.declared===1) { // single declaration			
 				p += id+": "+val.mode+" "+typeToString(val.type)+"\n";
 			} else {
@@ -405,7 +407,7 @@ function addPort() {
 	let type = "";
 	[...Array(setup.nPorts)].forEach(function(_, i) {		
 		name = document.getElementById("name"+(i+1)).value;
-		s1 += htmInput(i+1, "name", 6, name);
+		s1 += htmInput(i+1, "name", 10, name);
 		mode = document.getElementById("mode"+(i+1)).value;
 		s2 += htmInput(i+1, "mode", 1, mode);
 		type = document.getElementById("type"+(i+1)).value;
@@ -413,7 +415,7 @@ function addPort() {
 	});
 	
 	setup.nPorts += 1;
-	s1 += htmInput(setup.nPorts, "name", 6, "");
+	s1 += htmInput(setup.nPorts, "name", 10, "");
 	s2 += htmInput(setup.nPorts, "mode", 1, "");
 	s3 += htmInput(setup.nPorts, "type", 1, type);
 	document.getElementById("inName").innerHTML = s1;
@@ -423,20 +425,24 @@ function addPort() {
 }
 
 function removePort() {
-	if (setup.nPorts<2) {return;}
-	
-	setup.nPorts -= 1;
-	let s = document.getElementById("inName").innerHTML;
-	var n = s.lastIndexOf("<input");
-	document.getElementById("inName").innerHTML = s.substring(0, n);
-	
-	s = document.getElementById("inMode").innerHTML;
-	n = s.lastIndexOf("<input");
-	document.getElementById("inMode").innerHTML = s.substring(0, n);
-	
-	s = document.getElementById("inType").innerHTML;
-	n = s.lastIndexOf("<input");
-	document.getElementById("inType").innerHTML = s.substring(0, n);
+	if (setup.nPorts===1) {
+		document.getElementById("inName").innerHTML = htmInput(1, "name", 10, "");
+		document.getElementById("inMode").innerHTML = htmInput(1, "mode", 1, "");
+		document.getElementById("inType").innerHTML = htmInput(1, "type", 1, "");		
+    } else if (setup.nPorts>1) {	
+		setup.nPorts -= 1;
+		let s = document.getElementById("inName").innerHTML;
+		var n = s.lastIndexOf("<input");
+		document.getElementById("inName").innerHTML = s.substring(0, n);
+
+		s = document.getElementById("inMode").innerHTML;
+		n = s.lastIndexOf("<input");
+		document.getElementById("inMode").innerHTML = s.substring(0, n);
+
+		s = document.getElementById("inType").innerHTML;
+		n = s.lastIndexOf("<input");
+		document.getElementById("inType").innerHTML = s.substring(0, n);
+	}
 	changeSource();
 }
 
