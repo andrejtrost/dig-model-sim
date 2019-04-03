@@ -233,16 +233,17 @@ function searchSeq(b) {
 function VHDLout() {
 	let combProc = false;
 	parseCode(); // try to parse model
+
 	if (model) {
 	  //if (model.changed()) {parseCode();}	// recompile on change
 		
 	  // mark comb if statements
 	  let b = model.getBlok();
-	  combProc = searchComb(b, 0);
+	  combProc = searchComb(b, 0);	  
 console.log("BLOK comb: "+combProc);	  
 	  searchSeq(b);
 			
-	  model.visit(2); // visit, second pass
+	  model.visit(2); // visit, second pass	  
 	  console.log("VHDL pass 2");
   	  model.vars.forEach(function(v) {	
 			console.log(v.visit()+" val="+vec.out(v.val(), type(v).unsigned)+" mode="+mode(v)+" type="+typeToString(type(v))+
@@ -252,6 +253,10 @@ console.log("BLOK comb: "+combProc);
 	} else {
 		return;
 	}
+	
+	let vver="Output VHDL";
+	if (setup.vhdl2008) {vver="Output VHDL-2008";}
+	document.getElementById("output").innerHTML = vver;
 	
 	let s = VHDLports();
 	

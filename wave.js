@@ -264,7 +264,11 @@ function graf_refresh()  /* posodobi tabeli ports[] in signals[][], prikaz zoom(
 		for (a=vrstice; a < cur_signals; a++) signals.pop();
 	}
 	 
-	var cur_cycles = signals[0].length;
+	var cur_cycles;
+	if (signals[0]!==undefined) {cur_cycles = signals[0].length;}
+	else cur_cycles = 0;
+	
+	console.log("CC"+cur_cycles);
 	
 	if (cycles > cur_cycles) { // dodaj urne cikle
 		for (a=0; a < vrstice; a++) {				

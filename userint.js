@@ -10,7 +10,7 @@ let code=undefined;    // global code
     nPorts: initial number of ports in HTML table
 	maxBinSize: max size of binary bit string for unspecified literals
 */
-let setup = {ver: 0, syntaxC: false, nPorts: 1, maxBinSize: 8, vhdl2008: true};
+let setup = {ver: 0, syntaxC: false, nPorts: 1, maxBinSize: 8, vhdl2008: true, convUnused: false};
 
 // VHDL keywords or reserved identifiers
 const VHDLrsv=["abs","configuration","impure","null","rem","type","access","constant","in","of","report","unaffected","after","disconnect","inertial","on","return","units","alias","downto","inout","open","rol","until","all","else","is","or","ror","use","and","elsif","label","others","select","variable","architecture","end","library","out","severity","wait","array","entity","linkage","package","signal","when","assert","exit","literal","port","shared","while","attribute","file","loop","postponed","sla","with","begin","for","map","procedure","sll","xnor","block","function","mod","process","sra","xor","body","generate","nand","pure","srl","buffer","generic","new","range","subtype","bus","group","next","record","then","case","guarded","nor","register","to","component","if","not","reject","transport","std_logic","signed","unsigned","rising_edge","resize","to_signed","to_unsigned",
@@ -378,6 +378,16 @@ function modelErr(s, id, pos) { // error in model
 	return str;
 }
 
+
+function modelWarn(s, pos) {  //0104
+	let str = "<span style='color: blue;'>Warning </span>";
+	
+	if (pos!==undefined) {
+		str += "at "+pos+": ";
+	}
+	str += s;
+	return str;
+}
 
 function setStat(str) {
   document.getElementById("stat").innerHTML += str+"\n";

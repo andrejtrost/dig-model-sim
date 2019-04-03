@@ -597,6 +597,10 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 		a.set({level: Number(circ.getBlok().get().level)});		
 		stat.setPos(pos);
 		globAssignSize = type(v).size;
+		
+		//setLog("Assign: "+stat.getBlockLevel()); //0104
+		//v.set({hdl: {assignlevel:stat.getBlockLevel()}});				
+		
 		// opnode
 		let node = new Op({op:"", left:null, right:null});		
 		node = expression(node); //exprList(node);
@@ -882,12 +886,12 @@ console.log("***"+ id+ ": "+val.decl);
 		if (mod1===undefined) {mod1 = "";}
 		if (mod==="") { // test internal signals			
 			if (mod1==="" || mod1==="out") {			
-				if (!circ.ports.has(id)) {
-					setLog("Note: convert unused: "+id+" to output");										
-					let obj = parsePorts(id, "out", "u1", 1);		// TODO: get type		  				  
+				if (!circ.ports.has(id) && setup.convUnused) {					
+					setLog("Note: convert unused: "+id+" to output");
+					let obj = parsePorts(id, "out", typeToString(type(val)), 1); 
 					circ.setPorts(id, obj);	
-					const v = circ.getVar(id, true); // TODO v === val ??
-					v.set({mode: "out"});
+					//const v = circ.getVar(id, true); // TODO v === val ??
+					val.set({mode: "out"});
 					
 				} else {
 					setLog("Note: unused variable: "+id);
@@ -895,12 +899,11 @@ console.log("***"+ id+ ": "+val.decl);
 			}
 			
 			if (mod1==="in") {
-				if (!circ.ports.has(id)) {
+				if (!circ.ports.has(id) && setup.convUnused) {
 					setLog("Note: convert unused: "+id+" to input");										
-					let obj = parsePorts(id, "in", "u1", 1);		// TODO: get type		  				  
-					circ.setPorts(id, obj);
-					const v = circ.getVar(id, true); // TODO v === val ??
-					v.set({mode: "in"});					
+					let obj = parsePorts(id, "in", typeToString(type(val)), 1);
+					circ.setPorts(id, obj);					
+					val.set({mode: "in"});					
 				} else {
 					if (undeclareIds==="") {undeclareIds = id;}
 					else {undeclareIds += ","+id;}

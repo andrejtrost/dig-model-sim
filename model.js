@@ -147,6 +147,9 @@ function Stat() {    // statistics and tmp values
 			blockLevel -= 1;
 		}
 	}
+	function getBlockLevel() { //0104
+		return blockLevel;
+	}
 	
 	function setPos(p) { pos = p; }
 	function getPos() { return pos;}
@@ -181,7 +184,7 @@ function Stat() {    // statistics and tmp values
 		return s;
 	}
 	
-	return {init, initNames, addName, getNames, blockName, pushBlock, popBlock, setPos, getPos, addID, getSet, incNum, emit};
+	return {init, initNames, addName, getNames, blockName, pushBlock, popBlock, getBlockLevel, setPos, getPos, addID, getSet, incNum, emit};
 }
 
 stat = new Stat(); // global status object, resource statistics and global tmp values
@@ -380,10 +383,12 @@ function Var(s) { "use strict";
 		if (logset) {console.log("Var.set type "+log);}
 	}
 	
-	if (o.hasOwnProperty("hdl")) {
+	if (o.hasOwnProperty("hdl")) {		
 		if (o.hdl.hasOwnProperty("mode")) {obj.hdl.mode = o.hdl.mode; log+=" mode:"+o.hdl.mode;}
 		if (o.hdl.hasOwnProperty("assignments")) {obj.hdl.assignments = o.hdl.assignments; log+=" a:"+o.hdl.assignments;}
 		if (o.hdl.hasOwnProperty("assignop")) {obj.hdl.assignop = o.hdl.assignop; log+=" op"+o.hdl.assignop;}
+		if (o.hdl.hasOwnProperty("assignb")) {obj.hdl.assignb = o.hdl.assignb; log+=" ab:"+o.hdl.assignb;} //0104 assignment block and else block
+		if (o.hdl.hasOwnProperty("assigne")) {obj.hdl.assigne = o.hdl.assigne; log+=" ae:"+o.hdl.assigne;}
 		if (o.hdl.hasOwnProperty("val")) {obj.hdl.val = o.hdl.val; log+=" v="+o.hdl.val;}		
 		if (o.hdl.hasOwnProperty("names")) {obj.hdl.names = o.hdl.names; log+=" names="+o.hdl.names.size;}
 		if (logset) {console.log("Var.set hdl "+log);}
@@ -970,12 +975,13 @@ function Statement(t) {  "use strict";
 		return false;
 	}
 	
-	function visit(pass, vars) {  // Statement.visit		
+	function visit(pass, vars, block) {  // Statement.visit		
 		let str = obj.id+": ";
 		let assignments = 0;
-		if (log) {console.log("Statement.visit: "+pass);}
+		if (log) {console.log("Statement.visit: "+pass+" bck="+block.name);}
 		
 		if (obj.id==="=" || obj.id==="<=") {
+			//setLog("test");
 			if (pass===1) { // first pass, indentify number & type of assignments, count operands			
 			    if (obj.id==="<=") {stat.addID(obj.target.get().name, Resource.FF);} // save id
 				
@@ -987,7 +993,38 @@ function Statement(t) {  "use strict";
 				assignments = hdl(obj.target).assignments;
 				if (assignments===undefined) {assignments=0;}
 
-				obj.target.set({hdl: {assignments:assignments+1, assignop:obj.id}}); 
+				obj.target.set({hdl: {assignments:assignments+1, assignop:obj.id}});
+				
+				//setLog("Visit: "+block.name); //0104
+				if (block.name==="1") { // first level block
+					if (hdl(obj.target).assignb === undefined && hdl(obj.target).assigne === undefined) {
+						obj.target.set({hdl: {assignb:block.name}});
+					} else {
+						setLog(modelWarn("Statement overrides previous assignment!",obj.pos));	// Warn unconditional override
+						obj.target.set({hdl: {assignb:block.name}});
+					}
+				} else { // next level blocks 
+					//setLog(block.name+" var "+obj.target.get().name);
+					if (block.name.slice(-1)==="e") { // else block
+						if (hdl(obj.target).assignb === undefined) {  // test assignment block
+							obj.target.set({hdl: {assigne:block.name}});
+						} else {
+							var bname = hdl(obj.target).assigne;
+							if (bname===undefined || block.name.length <= bname.length) { // save lowest block
+								obj.target.set({hdl: {assigne:block.name}});
+							}
+						}
+					} else {					
+						if (hdl(obj.target).assignb === undefined) {  // test assignment block
+							obj.target.set({hdl: {assignb:block.name}});
+						} else {
+							var bname = hdl(obj.target).assignb;
+							if (block.name.length <= bname.length) { // save lowest block
+								obj.target.set({hdl: {assignb:block.name}});
+							}
+						}
+					}
+				}				
 				
 				str += obj.target.visit()+"= "; // visit target, set mode=out
 				setHdlMode(obj.target, "out");
@@ -1021,9 +1058,22 @@ function Statement(t) {  "use strict";
 				}
 				
 			} else {  // second pass
+				//0104				
+				if (obj.id==="=") {
+					if (hdl(obj.target).assignb === undefined) { // only defined in else!
+						setLog(modelWarn("Uncomplete assignment (else) creates latch!",obj.pos));
+					} else {
+						//setLog(hdl(obj.target).assignb+", "+hdl(obj.target).assigne);
+						if (hdl(obj.target).assignb.length>1 && hdl(obj.target).assigne === undefined) {
+							setLog(modelWarn("Uncomplete assignment creates latch!",obj.pos));
+						}
+					}
+				}
+				
 				if (obj.expr.count()===1) {  // single assignment to num => constant
 					if ((type(obj.expr).id==="num") && (hdl(obj.target).assignments===1) && (hdl(obj.target).assignop==="=")
-						&& mode(obj.target)!=="out") {						
+						&& (mode(obj.target)!=="out") && (hdl(obj.target).assignb==="1")) { // constant def. in main block
+						
 						if (type(obj.target).unsigned && !type(obj.expr).unsigned) { // signed num to unsigned const
 							const mask = vec.mask(type(obj.target).size);
 							obj.target.set({hdl: {mode:"const", val:(obj.expr.val()[0] & mask[0])}});
@@ -1312,7 +1362,7 @@ function Blok(namestring) {
 			if (st.get().id==="=") {obj.combCnt += 1;}
 			if (st.get().id==="<=") {obj.seqCnt += 1;}
 		}
-		str += st.visit(pass, vars)+"\n";
+		str += st.visit(pass, vars, obj)+"\n";  //0104 pass block object
 		if (pass===1 && (st.get().id==="=" || st.get().id==="<=")) {
 			let id = st.get().target.get().name; 
 //console.log("Blok: = "+id);
