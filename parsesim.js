@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.24";
+const parseVersion = "V.25";
 const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -471,7 +471,8 @@ function Parse(k) {
 console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);			
 			e.set({type: {unsigned: true, size: 1}});
 			
-		} else if (boolRel && type(e).bool!==true) { // add required operator (value != 0)			
+		} else if (boolRel && type(e).bool!==true) { // add required operator (value != 0)
+console.log("*relation bool NORELOP");			
 			let o = "!=";
 			let rightObj = new NumConst(0); 
 			
@@ -504,6 +505,8 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 				o = consume().id;				
 			}
 			
+			const bool1 = type(x).bool ? true:false;
+
 			//let o = consume().id;
 			// set empty or create new Op
 			if (x.getOp()==="") {x.op(o);} 
@@ -512,6 +515,10 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 			// second relation
 			let x2 = relation(new Op({op:"", left:null, right:null}), boolRel); 
 			x.right(x2);
+			const bool2 = type(x2).bool ? true:false;
+
+console.log("BBB1:2 "+bool1+bool2);	
+			if (bool1 && bool2) x.set({type: {bool: true}});
 			
 			const sz1 = type(x).size;
 			const sz2 = type(x2).size;
@@ -540,7 +547,7 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 		return x;
 	}
 	
-	function expression(n, boolRel) {  // expression :== bool { OR,XOR bool}		
+	function expression(n, boolRel) {  // expression :== bool { OR,XOR bool}	
 		let x = bool(n, boolRel);
 		let o = "?";
 		if (x === undefined) {return;}
@@ -556,9 +563,14 @@ console.log("**** Cmp:"+o+" size: "+type(e).size+", "+type(e2).size);
 				x = new Op({op:o, left:x, right:null}, opType); // type(x)
 			}
 			
+			const bool1 = type(x).bool ? true:false;
+			
 			// second relationA
 			let x2 = bool(new Op({op:"", left:null, right:null}), boolRel);
 			x.right(x2);
+			
+			const bool2 = type(x2).bool ? true:false;
+			if (bool1 && bool2) x.set({type: {bool: true}});
 						
 			let sz = Math.max(type(x).size, type(x2).size);			
 			
