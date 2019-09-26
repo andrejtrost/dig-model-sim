@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.25";
+const parseVersion = "V.26";
 const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -49,6 +49,9 @@ function Circuit() {
 		
 		let v = new Var(id);		
 		if (ports.has(id)) { // get type & mode from ports
+			if (ports.get(id).init!==undefined) {			
+				v.set({init: ports.get(id).init});
+			}			
 			v.set({type: ports.get(id).type});
 			v.set({mode: ports.get(id).mode});
 		} else {             // ...or from global setup
@@ -183,7 +186,7 @@ function Parse(k) {
 		if (!peek().isVHD() && !setup.syntaxC) {throw parseErr("cuse");}
 	}	
 	
-	function primary(n) { // primary :== name | literal | ( expression )	
+	function primary(n) { // primary :== name | literal | ( expression )
 		let t=peek();
 		
 		if (t.isID()) { // identifier, save variable & set op type
@@ -213,7 +216,11 @@ function Parse(k) {
 					if (t.id===")") { consume(); }
 					else {throw parseErr("exp",")");} // Expected ) 
 					if (!(num>=num2)) {throw parseErr("slice",")");}
-					if (num>=type(v).size) {throw parseErr("slice",")");}
+					if (type(v).array) {
+						if (num>=type(v).asize){throw parseErr("slice",")");}
+					} else {
+						if (num>=type(v).size) {throw parseErr("slice",")");}
+					}
 					
 					v= new Slice(v); // change
 					v.sliceSetup(num, num2);
@@ -743,6 +750,8 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	function parseStatement(oneStatement) // parse & return known statement or null
 	{		
 		let statement = null;
+		let isSlice = false;
+		let indexID = "";
 		
 		skipSeparators();		
 		let t = peek();
@@ -752,11 +761,30 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		  let id = consume().id; // save first identifier
 		  let delimiter = peek().id;
 		  
+		  if (peek().id === "(") { // variable slice
+			isSlice = true;
+			consume();
+			t=peek();
+			if (t.isID()) { // slice with index variable
+
+				indexID = consume().id;							
+				t=peek();
+				if (t.id===")") { consume(); }
+				else {throw parseErr("exp",")");}
+			} else {
+				throw parseErr("explit");
+			}
+		  }
+		  
 		  if (peek().isAssign()) {  // expect assignment
-			let v = circ.getVar(id);   // get output var		
+			let v = circ.getVar(id);   // get output var
+			if (isSlice) {			// transform variable to slice 
+				v = new Slice(v);
+				v.sliceSetup(-1, circ.getVar(indexID));
+			}
 			if (mode(v)==="in") {
 				throw parseErr("tin", id); //Assignment target: '"+id+"' is input signal!");
-			}			  
+			}
 			
 			let op = consume().id;
 			statement = parseAssign(v, op, pos); // return statement or undefined
@@ -778,32 +806,65 @@ console.log("parse:condition type: "+typeToString(type(n)));
 				} else if (delimiter!==":") {
 					delimiter = "?";
 					console.log("EEE");
-				}
-				
-				
+				}			
 			  }
 			  
 			  let vmode = "";
 			  let tmp = peek().id;
+			  let vmem = false;
+			  let numArray = [];
 			  
 			  if (tmp==="in" || tmp==="out") { // read signal mode
 				vmode = consume().id;
 				tmp = peek().id;
 			  }
 			  
-			  tmp = consume().id;
-//			  console.log(id + ":" + peek().id + " "+tmp);
+			  if (peek().isNum()) {  // check if type begins with digit (array declaration) and consume 2 ident
+								
+				vmem = true;
+				//tmp = "".concat(consume().id, consume().id); // consume number and type declaration
+				// to do, check single assignment and internal signal
+				tmp = consume().id;							
+				if (!peek().isTypeID()) {throw parseErr("Unknown data type in array declaration!", id);}
+				if (Number(tmp)<1 || Number(tmp)>1024) {throw parseErr("Unsupported size of array declaration (1-1024)!", id);}
+				
+				tmp = tmp.concat(consume().id);
+				
+				if (vmode!="") {throw parseErr("Mode in/out not allowed in array declaration!", id);}
+
+				if (peek().id === "=") { // assignment	
+					
+					let n = 0;
+					
+					consume().id;
+					if (!peek().isNum()) {throw parseErr("Expected number list!", id);}
+					numArray.push([Number(consume().id),0]);
+					while (peek().id === ",") {
+						consume().id;
+						if (!peek().isNum()) {throw parseErr("Expected number list!", id);}
+						numArray.push([Number(consume().id),0]);						
+					}
+				}
+				
+			  } else {
+				tmp = consume().id;  
+			  }
+			  
 			  let declared = 1;
 			  
 			  varid.forEach(function (ident, j) {
-				  declared = (j === varid.length-1) ? 1 : 2;				  
-				  let obj = parsePorts(ident, vmode, tmp, declared);				  
 				  // check if not already in ports
 				  if (circ.ports.has(ident)) {throw parseErr("decl", ident);}
-				  circ.setPorts(ident, obj);	
+				  
+				  declared = (j === varid.length-1) ? 1 : 2;			  
+				  let obj = parsePorts(ident, vmode, tmp, declared)				  
+				  if (vmem) { // add init attribute
+					if (numArray.length!=0) { obj.init = numArray; }
+				  }
+				  circ.setPorts(ident, obj);	// set port properties
 				  
 				  if (circ.vars.has(ident)) {throw parseErr("decl", ident);}
-				  circ.getVar(ident);
+				  let v = circ.getVar(ident);				  
 			  });
 		  } else { 
 			throw parseErr("exp", "=");  //"Unexpected token: '"+peek().id+"'!"
@@ -872,8 +933,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	  
 	  // check ports usage, note: in used as out checked at assignment visit,
 	  //   out used as inout solved at 2nd pass visit
-	  circ.ports.forEach(function (val, id) {
-console.log("***"+ id+ ": "+val.decl);		  
+	  circ.ports.forEach(function (val, id) {		  
 		v = circ.getVar(id, true);
 		if (v!==null) {
 			mod = mode(v);			

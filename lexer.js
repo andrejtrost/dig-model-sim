@@ -29,6 +29,12 @@ function Token(tokenName, tokenType, position, numFormat) {
  const fmt = numFormat;  // number format: d|b|h + digit count
  
  function isID() {return (type==="id");}
+ function isTypeID() {
+	 if (type!=="id") return false;
+	 if (/^(s|u)([0-9]*)$/.test(id)) return true; // correct pattern
+	 return false;
+ }
+ 
  function isNum() {return (type==="num");} 
  function isAssign() {return (type==="=");} 
  function isOp() {return (type==="op");}
@@ -46,7 +52,7 @@ function Token(tokenName, tokenType, position, numFormat) {
  function format() { return fmt; }
 // console.log("Token: '"+id+"' "+position.y+","+position.x); 
  
- return {id, isVHD, isID, isNum, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos, format};
+ return {id, isVHD, isID, isTypeID, isNum, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos, format};
 }
 
 

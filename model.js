@@ -258,36 +258,56 @@ function Slice(v) {
 	let low = 0;  
 	let size = 1;
 	let mask = Object.assign({}, vec.mask(1));
+	let update = false;
+	let nextValue = [0, 0];
 	let index = null;
+	let isArray = false;
 	
-	function sliceSetup(m, n) { // range(m...n) 
-		if (m===-1) { // new: -1 = variable index
+	function sliceSetup(m, n) { // range(m...n)	
+		if (m===-1) { // new: -1 = denote variable index
 			mode = -1;
-			size = 1; 
-		    if (type(variable).array>1) { // variable is array !
-				size = Number(type(variable).array);
-			}			
+			size = 1; // one bit or 
+		    if (type(variable).array) { // variable is memory array
+				size = Number(type(variable).size);
+			}
 			index = n;
 		} else {		
 			mode = Number(m);
 			low = Number(n);
-			size = mode-low+1;
-			mask = Object.assign({}, vec.mask(mode-low+1));
+			size = mode-low+1; // number of slice elements (or bits)				
+			if (type(variable).array) { // memory variable, slice not yet fully implemented
+				size = size*Number(type(variable).size);
+console.log("Warning: partial implemented memory size: "+size);	// check bounds
+			}						
 		}
+		mask = Object.assign({}, vec.mask(size));
 	}
 	
 	function val() {
 		let b = low;
+		let v = [0, 0];
 		
-		if (mode===-1) { // get one bit, TODO: check out of range
+		if (mode===-1) { // get indexed value, check index TODO: report index out of range
 			b = index.val()[0];
-			console.log("Index: "+b);			
+			if (type(variable).array) {
+				if (b>=type(variable).asize) {
+					b = 0;
+					console.log("Index out of bounds");			
+				}
+			}			
+			console.log("Index: "+b);
 		}
-		let v = vec.shiftRight(variable.val(), b);
-		console.log("Vector [0]: "+v[0]);
+		
+		if (type(variable).array) {			
+			v[0] = variable.val(b)[0];
+			v[1] = variable.val(b)[1];
+		} else {			
+			v = vec.shiftRight(variable.val(), b);
+		}
+console.log("Slice.val "+variable.get().name+"("+b+") ="+v.toString()+" mask:"+mask[0]+","+mask[1]);
+
 		v[0] &= mask[0];
 		v[1] &= mask[1];
-	
 		return v;		
 	} 
 	
@@ -309,6 +329,18 @@ function Slice(v) {
 		variable.set(o);
 	}
 	
+	function setNext(n) { // call variable setNext and provide index
+		let idx = 0;
+		
+		if (mode===-1) {  // indexed array
+			idx = index.val()[0];
+			update = variable.setNext(n, idx);			
+		} else {
+console.log("Error: setNext slice unsupported mode!");
+		}
+		return update;	
+	}
+	
 	function visit() {
 		stat.addName(variable.get().name);
 		if (mode===-1) {return variable.get().name+"("+index.get().name+")";}
@@ -327,16 +359,27 @@ function Slice(v) {
 	
 	function count() {return 1;}
 	
-	return {val, get, set, sliceSetup, visit, emitVHD, count};
+	return {val, get, set, setNext, sliceSetup, visit, emitVHD, count};
 }
 
 function Var(s) { "use strict";
- let obj = {isVar:true, name:s, mode:"", type:{id:"sig", unsigned:true, size:0, declared:0}, mask:[0, 0], hdl:{}}; // target:"" or "=" numtarget:0, 1, 
- let value = [0, 0];
+ let obj = {isVar:true, name:s, mode:"", type:{id:"sig", unsigned:true, size:0, declared:0, array:false, asize:0}, mask:[0, 0], init:[], hdl:{}}; // target:"" or "=" numtarget:0, 1, 
+ let value = [0, 0]; // value of variable or first element of memory array
+ let memory = [];    
  let nextValue = [0, 0];
+ let nextIdx = 0;
  let update = false;
  
- function val() {return value;} 
+ function val(i) {
+     if (i !== undefined) {
+		 if (i>=0 && i<memory.length) {return memory[i];}
+		 else {
+			console.log("Unexpected: Array read index out of range: "+i); 
+			return [0, 0];
+		 }
+	 }
+	 return value;
+ }
 
  function setVal(v) {
 	if (!(Array.isArray(v) && v.length===2)) {
@@ -368,6 +411,8 @@ function Var(s) { "use strict";
 	if (o.hasOwnProperty("name")) {obj.name = o.name;}
 	if (o.hasOwnProperty("mode")) {obj.mode = o.mode;}
 	
+	if (o.hasOwnProperty("init")) {obj.init = o.init;}
+	
 	if (o.hasOwnProperty("type")) {	
 		if (o.type.hasOwnProperty("id")) {obj.type.id = o.type.id; log+=" id:"+o.type.id;}
 		if (o.type.hasOwnProperty("unsigned")) {obj.type.unsigned = o.type.unsigned; log+=" u:"+o.type.unsigned;}
@@ -378,7 +423,27 @@ function Var(s) { "use strict";
 			log+=" size:"+o.type.size;
 		}
 		if (o.type.hasOwnProperty("declared")) {obj.type.declared = o.type.declared; log+=" dec:"+o.type.declared;}		
-		if (o.type.hasOwnProperty("array")) {obj.type.array = o.type.array; log+=" array:"+o.type.array;}	
+		if (o.type.hasOwnProperty("array")) {obj.type.array = o.type.array;}
+		if (o.type.hasOwnProperty("asize")) { // set array size and initialize memory
+			obj.type.asize = o.type.asize; 
+			var i;
+			if (obj.init === undefined || obj.init.length == 0) {
+				memory = [];
+				for (i=0; i<obj.type.asize; i++) {
+					memory.push([i+1, 0]);
+				}
+			} else {
+				for (i=0; i<obj.type.asize; i++) {
+					if (i<obj.init.length) {
+						memory.push(obj.init[i]);						
+					} else {
+						memory.push([9, 0]);
+					}
+				}
+				log+=" array init "							
+			}
+			if (o.type.asize>0) {log+=" array:"+o.type.asize;}
+		}
 		if (o.type.hasOwnProperty("def")) {obj.type.def = o.type.def; log+=" def";}
 		if (logset) {console.log("Var.set type "+log);}
 	}
@@ -395,7 +460,7 @@ function Var(s) { "use strict";
 	}
  }
  
- function setNext(n) { // if masked input != value, set nextValue & return true
+ function setNext(n, idx) { // if masked input != value, set nextValue & return true
 	if (!(Array.isArray(n) && n.length===2)) {
 		console.log("Var.setNext "+obj.name+" param error");		
 		console.log(n);
@@ -413,17 +478,33 @@ function Var(s) { "use strict";
 	}
 	
 	update = false;	
-	if (nextValue[0] !== value[0] || nextValue[1] !== value[1]) {		
-		if (logval) {console.log("NEW next val "+obj.name+" = "+vec.hex(nextValue)+" m:"+vec.hex(obj.mask));}
-		update = true;
-	} 
+	if (obj.type.array) {  // memory array
+		if (idx>=0 && idx<obj.type.asize) {
+			nextIdx = idx;
+			if (nextValue[0] !== memory[idx][0] || nextValue[1] !== memory[idx][1]) {		
+			if (logval) {console.log("NEW next val "+obj.name+"("+idx+") = "+vec.hex(nextValue)+" m:"+vec.hex(obj.mask));}
+			update = true;
+			} else {
+				console.log("Var.setNext memory setup error");
+			}
+		} 
+	} else {	
+		if (nextValue[0] !== value[0] || nextValue[1] !== value[1]) {		
+			if (logval) {console.log("NEW next val "+obj.name+" = "+vec.hex(nextValue)+" m:"+vec.hex(obj.mask));}
+			update = true;
+		} 
+	}
 	return update;	 
  }
  
  function next() {
 	 if (update) {
-		Object.assign(value, nextValue);
+		 if (obj.type.array) {  
+		    Object.assign(memory[nextIdx], nextValue);
+		 } else {			
+			Object.assign(value, nextValue);
 		//console.log("Update "+obj.name+" "+vec.hex(nextValue));
+		 }
 		update = false;
 		return true;
 	 }
@@ -954,7 +1035,9 @@ function Statement(t) {  "use strict";
 				console.log("St.val "+obj.target.get().name+" = "+vec.hex(res)+", old:"+vec.hex(obj.target.val()));
 			}			
 			
-			return obj.target.setNext(res);  // true, if value changed
+			change = obj.target.setNext(res);  // true, if value changed
+			
+			return change;
 		}
 		if (obj.id==="if") {
 			let b = obj.expr.val();
@@ -1184,8 +1267,9 @@ function Statement(t) {  "use strict";
 					
 			stat.initNames(); //12.3.
 			expStr = obj.expr.emitVHD();
-			for (const id of stat.getNames()) { // 12.3.
-						process.addVar(id);
+			for (const id of stat.getNames()) { // add comb expression vars to sensitivity list
+				let v1 = model.getVar(id, true);
+				if (v1!==undefined && hdl(v1).mode!=="const" && obj.id==="=" && isComb) { process.addVar(id); }
 			}
 			
 			let lsz = type(obj.target).size;
@@ -1247,15 +1331,18 @@ console.log("St.emit left:"+lsz+" r:"+rsz);
 				if (str.slice(0,1)==="(" && str.slice(-1)===")") {str = str.slice(1, -1);}				
 			}	
 
-			str = spaces + obj.target.visit()+" <= "+str+";\n";
+			str = spaces + obj.target.emitVHD()+" <= "+str+";\n";
 			
 			//str += "\n";
 		} else if (obj.id==="if") {  // if statement, check if belongs to comb
 			stat.initNames(); //12.3.
 			let condStr = obj.expr.emitVHD(); // get condition and strip spaces
 			if (condStr.slice(0,1)==="(" && condStr.slice(-1)===")") {condStr = condStr.slice(1, -1);}
-			for (const id of stat.getNames()) { // 12.3.
-						process.addVar(id);
+			for (const id of stat.getNames()) { // add comb if expr. vars to sensitivity list
+				let v1 = model.getVar(id, true);
+				if (v1!==undefined && hdl(v1).mode!=="const" && obj.combProc && isComb) { 
+				  process.addVar(id); 
+				}
 			}
 		
 			let doCase = obj.isCase || (obj.elsLink!==undefined && obj.elsLink.isCase) ? true : false;

@@ -82,18 +82,23 @@ function parsePorts(id, m, s, decl) {
 	let i = 0;	
 	let ch = s.charAt(0);
 	let anum = "";
+	let array = false;
+	let asize = 0;
 	
 	while (ch >= "0" && ch <= "9") {
 		anum += ch;
 		i += 1;
 		ch = s.charAt(i);		
 	}
-	if (anum !== "") {			
+	if (anum !== "") {	
 		s = s.slice(anum.length);
-		anum = Number(anum);
-		console.log("NN = "+anum+" s="+s);
-	} else {
-		anum = 0;
+		asize = Number(anum);
+		if (asize<=0 || asize>1023) {
+			asize=1;
+			modelErr("Unsupported size of array declaration (1-1024)!"); // TODO: unreachable?
+			//console.log("Error: Declared array size out of bounds 1...1023");
+		}
+		array = true;
 	}
 	
 	if (!typepatt.test(s)) {
@@ -106,7 +111,7 @@ function parsePorts(id, m, s, decl) {
 		throw modelErr("size", id);
 		size = 1;
 	}
-	return {type:{unsigned: u, size:size, array:anum, declared:decl}, mode:m};
+	return {type:{unsigned: u, size:size, array:array, asize:asize, declared:decl}, mode:m};
 }
 
 function getPorts() {  // get Ports data from html form

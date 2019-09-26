@@ -5,7 +5,7 @@ function makeBold(input) {
  const keywords=["library","use","all","entity","port","in","out","is","begin",
  "end", "architecture","downto","of", "signal","constant","process",
  "if", "then", "else", "elsif", "null", "case", "when", "others", 
- "map", "time", "wait", "for", "and", "or", "not", "xor"];
+ "map", "time", "wait", "for", "and", "or", "not", "xor", "type", "array"];
  return input.replace(new RegExp('(\\b)(' + keywords.join('|') + ')(\\b)','ig'), '$1<b class="w3-text-indigo">$2</b>$3');
 }
 
@@ -106,6 +106,8 @@ function VHDLports() {
   model.vars.forEach(function (val, id) {
 	var tip = "unsigned";
 	var mod = mode(val);
+	var init = val.get().init;
+	
 	if (mod==="") {		
 		if (type(val).unsigned===false) tip = "signed";
 		if (type(val).size===1) {tip = "std_logic";}
@@ -113,18 +115,42 @@ function VHDLports() {
 		if (hdl(val).mode === "const") {
 			s += " constant "+ val.get().name + " " + ": " + tip;
 		} else {
-			s += " signal "+ val.get().name + " " + ": " + tip;
+			if (type(val).array==true) { // array data type
+				s+=" type "+val.get().name+"_type is array (0 to "+(type(val).asize-1)+") of " + tip +"";
+				if (type(val).size>1) {
+					s += range(type(val).size)+";\n";
+				}
+				s+=" signal "+val.get().name+" : "+val.get().name+"_type";
+				if (init.length==0) { s += " := (others => "+initValue(val, 0)+");\n"; }
+				else {
+					s += " := (";
+					let j=0;
+					let jmax = type(val).asize;
+					let next=false;
+					for (j=0; j<jmax; j++) {
+						if (next) s+= ", ";
+						else next = true;
+						if (j<init.length) s += initValue(val, init[j][0]);
+						else s += initValue(val, 0);
+					}
+					
+					s += ");\n";
+				}
+			} else {
+				s += " signal "+ val.get().name + " " + ": " + tip;
+				if (type(val).size>1) {
+				  s += range(type(val).size);
+				}
+				if (hdl(val).mode === "const") {
+					s += " := "+initValue(val, hdl(val).val)+";\n";
+				} else if (hdl(val).assignop==="<=") {	// initial register value
+					s += " := "+initValue(val, 0)+";\n";
+				} else {		
+					s += ";\n";
+				}
+			}			
 		}
-		if (type(val).size>1) {
-		  s += range(type(val).size);
-		}
-		if (hdl(val).mode === "const") {
-			s += " := "+initValue(val, hdl(val).val)+";\n";
-		} else if (hdl(val).assignop==="<=") {	// initial register value
-			s += " := "+initValue(val, 0)+";\n";
-		} else {		
-			s += ";\n";
-		}
+		
 	}
   });
    
@@ -151,6 +177,7 @@ console.log("VHDLcomb: "+hdl(st.get().target).assignments);
 	if (proc) { // need comb process
 	    s1 = "";
 		process.initList();
+		setLog("Init");
 		b.statements.forEach(function(st) {
 			if (!st.get().translated) {
 				if (st.get().id==="=") {
