@@ -56,14 +56,16 @@ function initValue(variable, value)
 // VHDL ports and signals code
 function VHDLports() {
   if (model===undefined) {return;}
-  var namepatt = /^\w+$/
+  var namepatt = /^[a-zA-Z]\w+$/
   setLog("VHDL"); 
   
   let s = "library <b class='w3-text-brown'>IEEE</b>;\n";
   s += "use <b class='w3-text-brown'>IEEE.std_logic_1164</b>.all;\n";
   s += "use <b class='w3-text-brown'>IEEE.numeric_std</b>.all;\n\n"; 		
   
-  var comp_name = document.getElementById("comp_name").value;
+  var comp_name = model.name();
+  
+  //document.getElementById("comp_name").value;
   const sName=comp_name.toLowerCase();
   if (!namepatt.test(comp_name)) {setLog(modelErr("cnam", comp_name));}
   if (VHDLrsv.indexOf(sName)>=0) {setLog(modelErr("cnam",comp_name));}
@@ -112,43 +114,43 @@ function VHDLports() {
 		if (type(val).unsigned===false) tip = "signed";
 		if (type(val).size===1) {tip = "std_logic";}
 			
-		if (hdl(val).mode === "const") {
-			s += " constant "+ val.get().name + " " + ": " + tip;
-		} else {
-			if (type(val).array==true) { // array data type
-				s+=" type "+val.get().name+"_type is array (0 to "+(type(val).asize-1)+") of " + tip +"";
-				if (type(val).size>1) {
-					s += range(type(val).size)+";\n";
+		if (type(val).array==true) { // parse array data type
+			s+=" type "+val.get().name+"_type is array (0 to "+(type(val).asize-1)+") of " + tip +"";
+			if (type(val).size>1) {
+				s += range(type(val).size)+";\n";
+			}
+			s+=" signal "+val.get().name+" : "+val.get().name+"_type";
+			if (init.length==0) { s += " := (others => "+initValue(val, 0)+");\n"; }
+			else {
+				s += " := (";
+				let j=0;
+				let jmax = type(val).asize;
+				let next=false;
+				for (j=0; j<jmax; j++) {
+					if (next) s+= ", ";
+					else next = true;
+					if (j<init.length) s += initValue(val, init[j][0]);
+					else s += initValue(val, 0);
 				}
-				s+=" signal "+val.get().name+" : "+val.get().name+"_type";
-				if (init.length==0) { s += " := (others => "+initValue(val, 0)+");\n"; }
-				else {
-					s += " := (";
-					let j=0;
-					let jmax = type(val).asize;
-					let next=false;
-					for (j=0; j<jmax; j++) {
-						if (next) s+= ", ";
-						else next = true;
-						if (j<init.length) s += initValue(val, init[j][0]);
-						else s += initValue(val, 0);
-					}
-					
-					s += ");\n";
-				}
+				
+				s += ");\n";
+			}
+		} else { // parse constant or signal declaration
+			if (hdl(val).mode === "const") {
+				s += " constant "+ val.get().name + " " + ": " + tip;
 			} else {
 				s += " signal "+ val.get().name + " " + ": " + tip;
-				if (type(val).size>1) {
-				  s += range(type(val).size);
-				}
-				if (hdl(val).mode === "const") {
-					s += " := "+initValue(val, hdl(val).val)+";\n";
-				} else if (hdl(val).assignop==="<=") {	// initial register value
-					s += " := "+initValue(val, 0)+";\n";
-				} else {		
-					s += ";\n";
-				}
-			}			
+			}
+			if (type(val).size>1) {
+			  s += range(type(val).size);
+			}
+			if (hdl(val).mode === "const") {
+				s += " := "+initValue(val, hdl(val).val)+";\n";
+			} else if (hdl(val).assignop==="<=") {	// initial register value
+				s += " := "+initValue(val, 0)+";\n";
+			} else {		
+				s += ";\n";
+			}
 		}
 		
 	}
