@@ -61,7 +61,7 @@ function Lexer(txt) {
 	const len = txt.length;
 	let nextCh = ((len > 0) ? str.charAt(0) : "");
 	let index = 0;
-	let pos = {x:0, y:0};
+	let pos = {x:0, y:1};
 	let token = new Token("", "", pos);
 	let look = new Token("", "", pos);
 
@@ -141,6 +141,7 @@ function Lexer(txt) {
 				case "xor": look = new Token("^", "v", pos0); break;
 				case "if": look = new Token("if", "if", pos0); break;
 				case "else": look = new Token("else", "else", pos0); break;
+				case "elsif": look = new Token("elsif", "elsif", pos0); break;
 				default: look = new Token(z, "id", pos0);
 			}			
 			
@@ -234,13 +235,16 @@ function Lexer(txt) {
 				
 	}
 	
+	function current() { return token; }
 	function peek() { return look; }
 	
 	function consume() {
+		let savedToken = token;
 		scan();
-		return token;
+		return savedToken;
 	}	
 
 	scan();
-	return {peek, consume};
+	scan();
+	return {current, peek, consume};
 }

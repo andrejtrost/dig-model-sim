@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.26";
+const parseVersion = "V.27";
 const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -13,12 +13,17 @@ let globAssignSize=0; //29.3.
 let vec=new Vector();
 let model = undefined;
 
-function Circuit() {
+function Circuit(nameString) {
+ let nameStr = nameString;
  let b = new Blok("1");
  let vars = new Map(); 
  let ports = getPorts();
  let sequential = false;
  let srcChanged = false;     // input source changed after parsing
+ 
+ function name() {
+	 return nameStr;
+ }
  
  function runErr(str) {
 	const er = (english) ? "Runtime Error: " : "Napaka izvajanja: ";
@@ -163,15 +168,21 @@ function Circuit() {
 	 return srcChanged;
  }
  
- return {vars, ports, setPorts, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq, changed}; 
+ return {name, vars, ports, setPorts, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq, changed}; 
 }
 
 
 function Parse(k) {
     let circ = undefined;
 	
-	function peek() {return k.peek();}  
-	function consume() {return k.consume();}
+	function peek() {return k.current();}     // look current token
+	function consume() {return k.consume();}  // consume & return token	
+	function peekNext() {return k.peek();}    // look next token
+	
+	function skipSeparators() {
+		while (k.current().isSeparator()) {consume();}
+	}
+	
 	function parseErr(str, id) {
 		const er = (english) ? "Parse Error " : "Napaka ";
 		const er1 = (english) ? "at " : "v ";
@@ -660,7 +671,7 @@ console.log("BBB1:2 "+bool1+bool2);
 	function boolExp(n) {
 		let b = expression(n, true); // set boolRel to true
 				
-console.log("Condition: op='"+b.getOp()+"'");
+//console.log("Condition: op='"+b.getOp()+"'");
 		return b;
 	}
 	
@@ -668,86 +679,110 @@ console.log("Condition: op='"+b.getOp()+"'");
 	 let n = new Op({op:"", left:null, right:null});
 	 n = boolExp(n);
 
-console.log("parse:condition type: "+typeToString(type(n)));
+//console.log("parse:condition type: "+typeToString(type(n)));
 	 return n;
 	}
-	
-	function skipSeparators() {
-		while (peek().isSeparator()) {consume();}
-	}
-	
-	function parseIf(pos, oneStatement) //******** IF ***********
+
+	// parse conditional statement, pos: position, id="if", "elsif" special case
+	function parseIf(pos, id) // oneStatement, elsifStatement) //******** IF ***********
 	{		
-//console.log("IF onestatement:"+oneStatement+" prev:"+globPrevStatement);	
 		let ifst = new Statement("if");
 		ifst.set({level: Number(circ.getBlok().get().level)});
 		ifst.set({pos: pos});
-		stat.setPos(pos);
+		if (id==="elsif") {ifst.set({elsif: 1});}
 		
-		stat.pushBlock();		
-	
-		const ifBlockName = stat.blockName();
-		let ifblok = new Blok(ifBlockName);		
+		stat.setPos(pos);
+		stat.pushBlock(); // increment block level
+		
+		const blockNameStr = stat.blockName();
+		let ifblok = new Blok(blockNameStr); // create new code block
 		let elseBlok = null;
 		
-		takeToken("(");		
-		let c = condition(); 
-		ifst.setExpr(c);		
+		takeToken("(");		// parse condition
+		ifst.setExpr(condition());		
 		takeToken(")");
 		
-		let elsif = (oneStatement && globPrevStatement==="else") ? true : false;
-		
+		// detect "else if"
+		let detectElseIf = (id==="if" && globPrevStatement==="else") ? true : false;		
 		globPrevStatement="if";
 		
 		let saveBlok = circ.getBlok();
+		
+		
 		let level = saveBlok.get().level;
-		// if following else > elseif
-		if (elsif) {
-			ifst.set({level: (Number(level)-1)}); // Reverse level...
+			
+		// set if block level
+		if (detectElseIf) {  // "else if" > elsif, reverse level 
+			ifst.set({level: (Number(level)-1)});
 			ifst.set({elsif: 1});
 			ifblok.set({level: (Number(level))});
-		}
-		else {
+		} else {
 			ifblok.set({level: (Number(level)+1)}); 
 		}
 		
+		let singleStatement = false;
+		
 		circ.setBlok(ifblok);
+		let n = peek().id;
 
-		let n = peek().id;	
-		if (n==="\n" || n==="{") {	// new line or {, expect new block
-			parseBlock(ifblok, false);
+		if (n==="\n" || (setup.syntaxC && n==="{") || (!setup.syntaxC && n==="then")) {	// new line or {, expect new block
+			if ((id==="elsif") && saveBlok.get().oneline===true) {
+				{throw parseErr("Only single statement allowed in if-elsif !");} // Single line if followed by block elsif
+			}			
+			skipSeparators();
+			setup.syntaxC ? takeToken("{") : takeToken("then");					
+			parseBlock(ifblok, "");			
+			if (setup.syntaxC) {takeToken("}");}
 		} else {
-			parseBlock(ifblok, true); // one statement block
+			singleStatement = true; // one statement block
+			parseBlock(ifblok, "?");
 		}
 		
+				
 		skipSeparators();		
-		if (peek().id==="else") {
+		if (peek().id==="else") {			
 			consume();
-			elseBlok = new Blok(ifBlockName+"e");
+			elseBlok = new Blok(blockNameStr+"e");
 
             globPrevStatement="else";
-			if (elsif) {
+			if (detectElseIf) {
 				elseBlok.set({level: (Number(level))}); 
 			} else { 			
 				elseBlok.set({level: (Number(level)+1)}); 
 			}
 			circ.setBlok(elseBlok);	
-			n = peek().id;
-			if (n==="\n" || n==="{") {				
-				parseBlock(elseBlok, false);
-			} else {  
-				parseBlock(elseBlok, true);  // one statement block				
+			n = peek().id;	
+			if (n==="\n" || n==="{") {	// if not one statement block
+			    if (setup.syntaxC && n==="{") {takeToken("{");}
+				parseBlock(elseBlok);				
+				if (setup.syntaxC) {takeToken("}");}
+
+			} else {			
+				if (n==="if") parseBlock(elseBlok, "if");
+				else parseBlock(elseBlok, "");  
 			}			
+		} else if (peek().id==="elsif") {			
+			elseBlok = new Blok(blockNameStr+"e");
+			elseBlok.set({level: (Number(level))});
+			if (singleStatement) {elseBlok.set({oneline: true});}
+			circ.setBlok(elseBlok);	
+			parseBlock(elseBlok, "elsif"); // elsif is a one statement else block			
 		}
 		
 		ifst.setIf(ifblok, elseBlok);
 		circ.setBlok(saveBlok);
 		stat.popBlock();
 		
+		if (!singleStatement && !(id==="elsif")) { // parse block end, if not one statement
+			skipSeparators();
+			if (!setup.syntaxC) takeToken("end");
+			//setup.syntaxC ? takeToken("}") : takeToken("end");
+		}
+		
 		return ifst;
 	}	
 	
-	function parseStatement(oneStatement) // parse & return known statement or null
+	function parseStatement() // parse & return known statement or null
 	{		
 		let statement = null;
 		let isSlice = false;
@@ -755,12 +790,18 @@ console.log("parse:condition type: "+typeToString(type(n)));
 		
 		skipSeparators();		
 		let t = peek();
+		//if (t.id === endKey) {return null;}
 		
-		if (t.isID()) { // identifier
+		if (t.id==="if") {      // if statement
+			let pos = t.pos();			
+			consume();			
+			statement = parseIf(pos, ""); // return statement or undefined 
+		} else if (t.id==="}" || t.id==="else" || t.id==="elsif" || t.id==="end") {   // block end/separator, return witout parsing
+			return null;
+		} else if (t.isID()) { // identifier		
 		  let pos = t.pos();
 		  let id = consume().id; // save first identifier
-		  let delimiter = peek().id;
-		  
+		  let delimiter = peek().id;		  
 		  if (peek().id === "(") { // variable slice
 			isSlice = true;
 			consume();
@@ -790,12 +831,85 @@ console.log("parse:condition type: "+typeToString(type(n)));
 			statement = parseAssign(v, op, pos); // return statement or undefined
 						
 			if (op==="<=") {circ.setSeq(true);}
-		  } else if (delimiter.match(/^(:|,)$/)){ // parse declaration: sig: or sig, 
-			  consume();
+		  } else { 	  
+			throw parseErr("exp", "=");  //"Unexpected token: '"+peek().id+"'!"
+		  }		  
+				
+		} else if (t.id==="{") {
+			throw parseErr("unexp", "{");			
+		
+		} else {
+			if (!t.isEOF()) { throw parseErr("unexp", t.id); }//parseErr("Unexpected token: '"+t.id+"'!"); }
+		}
+      
+		return statement;		
+	}
+	
+	// parse block of statements in circuit c and save statements
+	// if (statementID!==undefined) parse one statement or specific statement (if, elsif)
+	// if (syntaxC) parse block delimiters TODO: '{' and '}'
+	function parseBlock(c, statementID) {    // c = Blok(), oneStatement: bool
+		let t = peek();
+		let statement = null;
+		
+		if (statementID) {				
+			let pos = t.pos();
+			if (statementID==="if" || statementID==="elsif") {
+				consume();
+				statement = parseIf(pos, statementID);
+			} else {
+				statement = parseStatement();
+			}
+			if (statement!==null) {
+				c.push(statement);
+			}
+		} else {
+			while (t.isSeparator()) { consume(); t=peek();}			
+			do {
+				statement = parseStatement();
+				if (statement!==null) {
+					c.push(statement);
+				}
+				t = peek();	
+				if (t.isEOF()) {break;}
+				if (t.id==="end" || t.id==="}") {break;}
+				if (t.id==="else" || t.id==="elsif") {break;}
+			} while (true);  // isEnd > isEOF			
+		}
+	}
+	
+  try {	  
+	clearLog();
+	stat.init();
+	let circuitName = defName;
+	let beginBlock = false;		 		 
+		 
+	skipSeparators(); // skip initial separators
+	
+	// parse optional circuit name (entity name) 	 
+	if (peek().id==="entity") {
+		consume();		 			
+		if (peek().isID()) {
+			circuitName = consume().id;
+		} else {
+			throw parseErr("Entity name error! ");
+		}		
+		skipSeparators();
+    } 
+	
+	circ = new Circuit(circuitName);
+	if (peek().id==="begin") {  // parse circuit block declaration
+		consume();
+		beginBlock = true;
+	} else if (peek().isID()) { // test for and parse declarations
+		do {
+			if (peekNext().id===":" || peekNext().id===",") {	
+			  let id = consume().id;
+			  let delimiter = consume().id;
 			  
 			  let varid = new Array();
 			  varid.push(id);
-			  
+			  			  
 			  while (delimiter===",") {				  
 				if (peek().isID()) {
 					id = consume().id;
@@ -866,61 +980,29 @@ console.log("parse:condition type: "+typeToString(type(n)));
 				  if (circ.vars.has(ident)) {throw parseErr("decl", ident);}
 				  let v = circ.getVar(ident);				  
 			  });
-		  } else { 
-			throw parseErr("exp", "=");  //"Unexpected token: '"+peek().id+"'!"
-		  }		  
-		} else if (t.id==="if") {
-			let pos = t.pos();			
-			consume();			
-			statement = parseIf(pos, oneStatement); // return statement or undefined 
-		} else if (t.id==="{") {
-			throw parseErr("unexp", "{");			
-		} else if (t.id==="}") {   // return witout parsing
-		} else {
-			if (!t.isEOF()) { throw parseErr("unexp", t.id); }//parseErr("Unexpected token: '"+t.id+"'!"); }
-		}
-      
-		return statement;		
-	}
-	
-	function parseBlock(c, oneStatement) {    // c = Blok(), oneStatement: bool
-		let t = peek();
-		let statement = null;
-		
-		if (oneStatement) { // parse one statement Block (eg. if (c) St)
-			statement = parseStatement(oneStatement);			
-			//statement.set({single: 1});
-			if (statement!==null) {
-				c.push(statement);
+
+			  skipSeparators();
+			  
+			} else {
+				break;
 			}
-		} else {
-			while (t.isSeparator()) { consume(); t=peek();}
-			takeToken("{");				
-			do {
-				statement = parseStatement(oneStatement);
-				if (statement!==null) {
-					c.push(statement);
-				}
-				t = peek();	
-				if (t.isEOF()) {break;}
-			} while (t.id!=="}");  // isEnd > isEOF	
-			
-			takeToken("}");
+		} while (peek().isID());
+		if (peek().id==="begin") {  // parse circuit block declaration
+			consume();
+			beginBlock = true;
 		}
 	}
+	 
+	parseBlock(circ); // main: parse circuit block
 	
-  try {	  
-	  clearLog();
-	  circ = new Circuit();
-	  stat.init();
-	  
-	  let t = peek();
-	 	
-	  parseBlock(circ);
-	  t = peek();
-	  if (!(peek().isEOF())) {
-		setLog(parseErr("Misplaced end of code block \"}\""));
-	  }
+	if (beginBlock===true) {takeToken("end");}
+	
+	skipSeparators();
+	
+	if (!(peek().isEOF())) {
+		if (peek().id==="end") { setLog(parseErr("Unexpected 'end'!")); }
+		else { setLog(parseErr("Misplaced code after end of block !")); }
+	}
 	  	  
 	  let logStr=circ.visit(1); // visit, first pass
 	  
@@ -1051,7 +1133,7 @@ console.log("parse:condition type: "+typeToString(type(n)));
 	  whenElseList.forEach(function(id) {		  
 		  circ.getBlok().statements.forEach(function(st) {
 			 if (st.get().id==="if") {
-				let block = st.get().ifBlock;				
+				let block = st.get().singleStatement;				
 				if (block.statements[0].get().id==="=" && block.statements[0].get().target.get().name===id) {					
 					let block2 = st.get().elseBlock;
 					if (block2!==null) {

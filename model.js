@@ -1432,7 +1432,8 @@ function Blok(namestring) {
 	if (o.hasOwnProperty("combCnt")) {obj.combCnt = o.combCnt; log+="ccnt: "+o.combCnt;}	 
 	if (o.hasOwnProperty("seqCnt")) {obj.seqCnt = o.seqCnt; log+="scnt: "+o.seqCnt;}
 	if (o.hasOwnProperty("level")) {obj.level = o.level; log+="level:"+o.level;}
-//console.log("Blok.set "+log);
+	if (o.hasOwnProperty("oneline")) {obj.oneline = o.oneline; log+="oneline:"+o.oneline;}
+console.log("Blok.set "+log);
  }
  
  function push(st) {
