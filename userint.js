@@ -3,7 +3,7 @@
 
 let english = false; // Log language
 let markErr = true;
-let code=undefined;    // global code
+let defName= "";     // Default entity name
 
 /* GLOBAL setup: 
     ver: version string, sytnaxC: true for C op syntax,
@@ -62,6 +62,15 @@ function getSetup() { // read document form settings, display version
 	setup.vhdl2008 = document.getElementById("lang2008").checked;
 	english = document.getElementById("english").checked;
 	markErr = document.getElementById("mark").checked;
+	defName = document.getElementById("comp_name").value;
+	
+	if (!(/^[a-zA-Z]\w+$/.test(defName)) || (VHDLrsv.indexOf(defName)>=0)) {
+		console.log("Error in Setup Circuit name: '"+defName+"' !");
+		defName = "Vezje";
+		console.log("Revert to default name: "+defName);
+		document.getElementById("comp_name").value = defName;
+	}
+	
 console.log(getUrlParameter('p'));
 }
 
@@ -292,9 +301,9 @@ function parseCode() // get setup and source, run Lexer and Parse
 {
   getSetup();
   const ta = document.getElementById(textID);  
-  const k = new Lexer("{\n"+ta.value+"}");
+  const k = new Lexer(ta.value); //Lexer("test: begin\n"+ta.value+"end");
    
-  code = new Parse(k);
+  Parse(k);
 }
 
 function parseButton(n) {

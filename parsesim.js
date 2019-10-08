@@ -2,7 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.27";
+const parseVersion = "V.28";
 const textID = "src";
 const MAXITER = 20;
 const MAXCYC = 1000;
@@ -13,11 +13,12 @@ let globAssignSize=0; //29.3.
 let vec=new Vector();
 let model = undefined;
 
-function Circuit(nameString) {
+function Circuit(nameString, toplevel) {
  let nameStr = nameString;
  let b = new Blok("1");
  let vars = new Map(); 
- let ports = getPorts();
+ let ports = (toplevel) ? getPorts() : new Map(); // get ports for top-level circuit
+ let labels = [];
  let sequential = false;
  let srcChanged = false;     // input source changed after parsing
  
@@ -168,12 +169,12 @@ function Circuit(nameString) {
 	 return srcChanged;
  }
  
- return {name, vars, ports, setPorts, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq, changed}; 
+ return {name, vars, ports, labels, setPorts, getVar, setVar, getBlok, setBlok, push, visit, val, setSeq, getSeq, changed}; 
 }
 
 
 function Parse(k) {
-    let circ = undefined;
+    let circ = undefined;  // current circuit for parsing
 	
 	function peek() {return k.current();}     // look current token
 	function consume() {return k.consume();}  // consume & return token	
@@ -781,8 +782,34 @@ console.log("BBB1:2 "+bool1+bool2);
 		
 		return ifst;
 	}	
+
+	function parseInstance(pos, id)
+	{
+		takeToken("(");
+		let varid = parseVarList();
+		takeToken(")");
+		
+		let i=0;
+		while (circ.labels.includes("u"+i)) { 
+			i +=1;
+		}
+		circ.labels.push("u"+i);
+		
+		st = new Instance(id, "u"+i);
+		st.set({pos: pos});
+		stat.setPos(pos);
+		varList = new Array();
+		varid.forEach(function (ident) {
+			varList.push(circ.getVar(ident));
+		});
+		
+		st.set({varList: varList});		
+
+		return st;
+	}
 	
-	function parseStatement() // parse & return known statement or null
+	
+	function parseStatement() // parse & return known statement or null, b = Blok()
 	{		
 		let statement = null;
 		let isSlice = false;
@@ -802,7 +829,13 @@ console.log("BBB1:2 "+bool1+bool2);
 		  let pos = t.pos();
 		  let id = consume().id; // save first identifier
 		  let delimiter = peek().id;		  
-		  if (peek().id === "(") { // variable slice
+		  if (peek().id === "(") {     // variable slice or instance
+			if (!circ.vars.has(id)) {  // not in variable list, parse port map instance
+				if (circ.getBlok().get().name !== "1") {throw parseErr("Instance is not allowed in nested blocks!");}
+				statement = parseInstance(pos, id);
+				return statement;
+			}
+		  
 			isSlice = true;
 			consume();
 			t=peek();
@@ -813,7 +846,7 @@ console.log("BBB1:2 "+bool1+bool2);
 				if (t.id===")") { consume(); }
 				else {throw parseErr("exp",")");}
 			} else {
-				throw parseErr("explit");
+				throw parseErr("explit"); // TODO: expected variable index
 			}
 		  }
 		  
@@ -845,10 +878,10 @@ console.log("BBB1:2 "+bool1+bool2);
 		return statement;		
 	}
 	
-	// parse block of statements in circuit c and save statements
+	// parse block of statements and save statements
 	// if (statementID!==undefined) parse one statement or specific statement (if, elsif)
 	// if (syntaxC) parse block delimiters TODO: '{' and '}'
-	function parseBlock(c, statementID) {    // c = Blok(), oneStatement: bool
+	function parseBlock(b, statementID) {    // b = Blok(), oneStatement: bool
 		let t = peek();
 		let statement = null;
 		
@@ -861,14 +894,14 @@ console.log("BBB1:2 "+bool1+bool2);
 				statement = parseStatement();
 			}
 			if (statement!==null) {
-				c.push(statement);
+				b.push(statement);
 			}
 		} else {
 			while (t.isSeparator()) { consume(); t=peek();}			
 			do {
 				statement = parseStatement();
 				if (statement!==null) {
-					c.push(statement);
+					b.push(statement);
 				}
 				t = peek();	
 				if (t.isEOF()) {break;}
@@ -878,9 +911,29 @@ console.log("BBB1:2 "+bool1+bool2);
 		}
 	}
 	
-  try {	  
-	clearLog();
-	stat.init();
+  // parse and return a list of variable names	
+  function parseVarList()
+  {
+	let id = consume().id;     // consume first id	
+	let varid = new Array(id);
+	let delimiter = peek().id;
+	
+	while (delimiter===",") {
+		consume();
+		if (peek().isID()) {
+			id = consume().id;
+			varid.push(id);
+			delimiter = peek().id;
+		} else {
+			throw parseErr("Expected identifier in a list! '"+peek().id+"'");
+		}
+	}
+	
+	return varid;
+  }
+
+  function parseEntity(toplevel)
+  {
 	let circuitName = defName;
 	let beginBlock = false;		 		 
 		 
@@ -888,7 +941,7 @@ console.log("BBB1:2 "+bool1+bool2);
 	
 	// parse optional circuit name (entity name) 	 
 	if (peek().id==="entity") {
-		consume();		 			
+		consume();
 		if (peek().isID()) {
 			circuitName = consume().id;
 		} else {
@@ -897,31 +950,16 @@ console.log("BBB1:2 "+bool1+bool2);
 		skipSeparators();
     } 
 	
-	circ = new Circuit(circuitName);
+	circ = new Circuit(circuitName, toplevel);
 	if (peek().id==="begin") {  // parse circuit block declaration
 		consume();
 		beginBlock = true;
 	} else if (peek().isID()) { // test for and parse declarations
 		do {
-			if (peekNext().id===":" || peekNext().id===",") {	
-			  let id = consume().id;
-			  let delimiter = consume().id;
-			  
-			  let varid = new Array();
-			  varid.push(id);
-			  			  
-			  while (delimiter===",") {				  
-				if (peek().isID()) {
-					id = consume().id;
-					console.log("LIST IDENT: "+id);
-					varid.push(id);					
-					delimiter = consume().id;
-					console.log("NEXT: "+delimiter);
-				} else if (delimiter!==":") {
-					delimiter = "?";
-					console.log("EEE");
-				}			
-			  }
+			if (peekNext().id===":" || peekNext().id===",") {
+			  // detect declaration, parse varList...
+			  let varid = parseVarList();
+			  takeToken(":");
 			  
 			  let vmode = "";
 			  let tmp = peek().id;
@@ -995,15 +1033,38 @@ console.log("BBB1:2 "+bool1+bool2);
 	 
 	parseBlock(circ); // main: parse circuit block
 	
-	if (beginBlock===true) {takeToken("end");}
+	if (beginBlock===true) {takeToken("end");}	  
+  }
 	
+  try {
+console.log("Begin Parse");	  
+	clearLog();
+	stat.init();	
+
+	parseEntity(true); // parse top level circuit, save to circ	
 	skipSeparators();
+	
+	if ((peek().id==="entity")) {
+		let save_circ = circ;
+		parseEntity(false);
+		
+		// save parsed circuit model to instance statement
+		let b = save_circ.getBlok();
+		b.statements.forEach(function(st) {
+			if (st.get().id==="inst") {
+				st.set({source: circ});
+			}
+		});
+		circ = save_circ; // restore the current circuit model
+		skipSeparators();
+	} 
 	
 	if (!(peek().isEOF())) {
 		if (peek().id==="end") { setLog(parseErr("Unexpected 'end'!")); }
 		else { setLog(parseErr("Misplaced code after end of block !")); }
 	}
 	  	  
+console.log("Begin Visit");
 	  let logStr=circ.visit(1); // visit, first pass
 	  
 	  let v;

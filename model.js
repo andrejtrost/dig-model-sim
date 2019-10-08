@@ -106,6 +106,7 @@ function Stat() {    // statistics and tmp values
 	let ff = new Set([]);
 	let names = new Set([]); // set of variable names
 	let pos = {x:0, y:0}; // model visit position
+	let labels = [];
 	
 	let blockLevel;
 	let blockArray;
@@ -120,6 +121,8 @@ function Stat() {    // statistics and tmp values
 		io = new Set([]);
 		ff = new Set([]);
 		
+		labels = [];
+console.log("INIT: labels len="+labels.length);
 		blockLevel = 0;
 		blockArray = [0, 0];		
 	}
@@ -184,7 +187,7 @@ function Stat() {    // statistics and tmp values
 		return s;
 	}
 	
-	return {init, initNames, addName, getNames, blockName, pushBlock, popBlock, getBlockLevel, setPos, getPos, addID, getSet, incNum, emit};
+	return {labels, init, initNames, addName, getNames, blockName, pushBlock, popBlock, getBlockLevel, setPos, getPos, addID, getSet, incNum, emit};
 }
 
 stat = new Stat(); // global status object, resource statistics and global tmp values
@@ -1451,14 +1454,27 @@ console.log("Blok.set "+log);
 			if (st.get().id==="<=") {obj.seqCnt += 1;}
 		}
 		str += st.visit(pass, vars, obj)+"\n";  //0104 pass block object
-		if (pass===1 && (st.get().id==="=" || st.get().id==="<=")) {
-			let id = st.get().target.get().name; 
-//console.log("Blok: = "+id);
-			if (targets.includes(id)) {	
-			//Multiple assignments to "+id+" in the same block!
-				throw modelErr("mult", id, st.get().pos); // Multiple assignments to "+id+" in the same block!", st.get().pos);				
-			} else {
-			  targets.push(id);
+		if (pass===1) {
+			if (st.get().id==="=" || st.get().id==="<=") {
+				let id = st.get().target.get().name; 
+	//console.log("Blok: = "+id);
+				if (targets.includes(id)) {	
+				//Multiple assignments to "+id+" in the same block!
+					throw modelErr("mult", id, st.get().pos); // Multiple assignments to "+id+" in the same block!", st.get().pos);				
+				} else {
+				  targets.push(id);
+				}
+			} else if (st.get().id==="inst") {
+				//let id = st.get().targets[0];
+				st.get().targets.forEach(function (id) {
+							
+console.log("Blok: visit = INST ********************** "+id);
+					if (targets.includes(id)) {	
+						throw modelErr("mult", id, st.get().pos); 
+					} else {
+					  targets.push(id);
+					}
+				});
 			}
 		}
 	});
@@ -1468,4 +1484,103 @@ console.log("Blok.set "+log);
  }
 	
  return {get, set, statements, targets, push, visit};
+}
+
+function Instance(name, labstr) {  "use strict"; 
+	let obj = {id: "inst", label: labstr, entity: name, portList: [], varList: [], targets: [], source: null, translated: false};
+		
+	function get() {
+		return obj;
+	}
+	
+	function set(o) {
+		let log="";
+		if (o.hasOwnProperty("pos")) {obj.pos = o.pos;}
+		if (o.hasOwnProperty("varList")) {obj.varList = o.varList; log+="varList";}
+		if (o.hasOwnProperty("source")) {obj.source = o.source; log+="source";}
+		if (o.hasOwnProperty("translated")) {obj.translated = o.translated; log+="translated:"+o.translated;}
+		if (logset) {console.log("Instance.set "+obj.id+log);}
+	}
+
+	function visit(pass)
+	{
+		if (pass===1) {
+			if (obj.source !== null) {			
+				var i = 0;
+				obj.source.ports.forEach(function (p, id) {
+					if (!obj.portList.includes(id) && (p.mode==="in" || p.mode==="out")) obj.portList.push(id);
+					if (p.mode==="out") {
+						setHdlMode(obj.varList[i], "out");
+						let varName = obj.varList[i].get().name;
+						obj.targets.push(varName);
+					} else if (p.mode==="in") {
+						setHdlMode(obj.varList[i], "in");
+					}
+					i += 1;
+
+				});
+				}
+			if (obj.varList.length !== obj.portList.length) {		
+				throw modelErr("Parameter number mismatch", "", stat.getPos());
+			}	
+		}
+		return;
+	}
+
+	function val(firstCycle, numCycle)
+	{
+		let change = false;
+		// set input variable values
+		obj.varList.forEach(function (id, j) {			
+			if (obj.source.getVar(obj.portList[j], true).get().mode==="in") {
+				let inval = id.val();
+				obj.source.getVar(obj.portList[j], true).setNext(inval);
+				obj.source.getVar(obj.portList[j], true).next();
+			}
+		});
+			
+		// evaluate statements (like valDelta, if...)
+		obj.source.getBlok().statements.forEach(function(st) {
+		if (st.val(firstCycle, numCycle)) {
+			change = true;
+			}
+		});
+		
+		let changeNext = false;
+		if (change) {		
+			obj.source.vars.forEach(function(v) {
+			if (v.next()) {changeNext = true;}
+			});
+		}
+		
+		// set output values
+		obj.varList.forEach(function (id, j) {
+			if (obj.source.getVar(obj.portList[j], true).get().mode==="out") {
+				let val = obj.source.getVar(obj.portList[j], true).val();
+//console.log("********************************** val "+id.get().name+" = "+val);
+				id.setNext(val);
+			}
+
+		});	
+
+		return changeNext;
+	}
+
+	function emitVHD()
+	{				
+		let str = obj.label + ": entity work."+obj.entity+" port map (\n";
+		
+		if (obj.source.getSeq()) str += "  clk => clk,\n";		
+		
+		obj.varList.forEach(function (id, j) {
+			str += "  "+obj.portList[j]+" => "+id.emitVHD();
+			if (j < varList.length-1) {str += ",\n";}
+		});
+		
+		str += " );\n";
+		
+		return str;
+	}
+	
+	return {get, set, visit, val,  emitVHD}
 }

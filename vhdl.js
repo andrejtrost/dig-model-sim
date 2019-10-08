@@ -161,17 +161,27 @@ function VHDLports() {
 
 function VHDLcomb(proc) {	
 	let s ="";
+	let b = model.getBlok();
+	// write component instantiations
+	b.statements.forEach(function(st) {
+		if (!st.get().translated && st.get().id==="inst") {
+			st.set({translated: true});
+			s += st.emitVHD(0, true)+"\n"; 
+		}
+	});
+	
 	
 	// write comb single assignments in the first level block
-	let b = model.getBlok();
-	b.statements.forEach(function(st) {
-		
+	
+	b.statements.forEach(function(st) {		
 		if (!st.get().translated) {
 			if (st.get().id==="=" && hdl(st.get().target).assignments===1) {				
 console.log("VHDLcomb: "+hdl(st.get().target).assignments);			
 				st.set({translated: true});
 				s += st.emitVHD(0, true);
-			} 
+			} else if (st.get().id==="inst") {
+				s += st.emitVHD();
+			}
 		}
 	});
 	
@@ -261,7 +271,7 @@ function searchSeq(b) {
 
 function VHDLout() {
 	let combProc = false;
-	parseCode(); // try to parse model
+	parseCode(); // try to parse model 
 
 	if (model) {
 	  //if (model.changed()) {parseCode();}	// recompile on change
