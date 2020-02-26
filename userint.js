@@ -10,7 +10,7 @@ let defName= "";     // Default entity name
     nPorts: initial number of ports in HTML table
 	maxBinSize: max size of binary bit string for unspecified literals
 */
-let setup = {ver: 0, syntaxC: false, nPorts: 1, maxBinSize: 8, vhdl2008: true, convUnused: false};
+let setup = {ver: 0, syntaxC: false, nPorts: 1, maxBinSize: 8, vhdl2008: true, stdlogic: true, convUnused: false};
 
 // VHDL keywords or reserved identifiers
 const VHDLrsv=["abs","configuration","impure","null","rem","type","access","constant","in","of","report","unaffected","after","disconnect","inertial","on","return","units","alias","downto","inout","open","rol","until","all","else","is","or","ror","use","and","elsif","label","others","select","variable","architecture","end","library","out","severity","wait","array","entity","linkage","package","signal","when","assert","exit","literal","port","shared","while","attribute","file","loop","postponed","sla","with","begin","for","map","procedure","sll","xnor","block","function","mod","process","sra","xor","body","generate","nand","pure","srl","buffer","generic","new","range","subtype","bus","group","next","record","then","case","guarded","nor","register","to","component","if","not","reject","transport","std_logic","signed","unsigned","rising_edge","resize","to_signed","to_unsigned",
@@ -51,8 +51,7 @@ function getUrlParameter(name) {
 };
 
 function getSetup() { // read document form settings, display version
-    //setInterval(checkInputCode, 2000);
-
+    //setInterval(checkInputCode, 2000);  
 	const v = (parseVersion===undefined) ? -1 : parseVersion;
  
 	document.getElementById('version').innerHTML = v;
@@ -60,6 +59,7 @@ function getSetup() { // read document form settings, display version
 	setup.syntaxC = synt;
 
 	setup.vhdl2008 = document.getElementById("lang2008").checked;
+	setup.stdlogic = document.getElementById("stdlogic").checked;
 	english = document.getElementById("english").checked;
 	markErr = document.getElementById("mark").checked;
 	defName = document.getElementById("comp_name").value;
@@ -177,7 +177,7 @@ function hide(id) {
 
 function save()
 {
- let data=document.getElementById(textID).value;
+ let data=editor.getValue(); 
  
  parseCode(); // try to parse model
  let p ="";
@@ -216,7 +216,9 @@ function save()
 		document.body.removeChild(a);
 		window.URL.revokeObjectURL(url);  
 	}, 0); 
- } 
+ }
+ unmarkSave();
+ editor.on("inputRead", markSave); 
 }
 
 function load(str, name) {
@@ -281,27 +283,17 @@ function load(str, name) {
 		
 	}
 	
-	document.getElementById(textID).value = str;	
+	editor.setValue(str);
+	unmarkSave();	
 	document.getElementById("comp_name").value = name;
 	changeSource();	
-}
-
-let saved=""; // last saved code
-
-function checkInputCode() {
-	const ta = document.getElementById(textID); 
-	if (saved !== ta.value) {
-		console.log("Input changed");
-		VHDLout();
-	}
-	saved = ta.value;
 }
 
 function parseCode() // get setup and source, run Lexer and Parse
 {
   getSetup();
-  const ta = document.getElementById(textID);  
-  const k = new Lexer(ta.value); //Lexer("test: begin\n"+ta.value+"end");
+  const ta = editor.getValue(); 
+  const k = new Lexer(ta); //Lexer("test: begin\n"+ta.value+"end");
    
   Parse(k);
 }
@@ -471,46 +463,7 @@ function removePort() {
 }
 
 
-// From: http://lostsource.com/2012/11/30/selecting-textarea-line.html
-function selectLine(lineNum) {
-	if (!markErr) return false;
-	
-	const tarea = document.getElementById(textID);
-    lineNum--; // array starts at 0
-	if (lineNum<0) return false;
-	
-    let lines = tarea.value.split("\n");
-
-    // calculate start/end
-    let startPos = 0, endPos = tarea.value.length;
-    for(let x = 0; x < lines.length; x++) {
-        if(x == lineNum) {break;}
-        startPos += (lines[x].length+1);
-    }
-
-    endPos = lines[lineNum].length+startPos;
-
-    // do selection
-    // Chrome / Firefox
-
-    if(typeof(tarea.selectionStart) != "undefined") {
-        tarea.focus();
-        tarea.selectionStart = startPos;
-        tarea.selectionEnd = endPos;
-        return true;
-    }
-
-    // IE
-    if (document.selection && document.selection.createRange) {
-        tarea.focus();
-        tarea.select();
-        let range = document.selection.createRange();
-        range.collapse(true);
-        range.moveEnd("character", endPos);
-        range.moveStart("character", startPos);
-        range.select();
-        return true;
-    }
-
-    return false;
+function selectLine(lineNum) { // select a line in CodeMirror
+	const len = editor.getLine(lineNum-1).length;
+	editor.setSelection({line: lineNum-1, ch:0}, {line: lineNum-1, ch:len});
 }

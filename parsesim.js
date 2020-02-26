@@ -2,8 +2,7 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.28";
-const textID = "src";
+const parseVersion = "V.30";
 const MAXITER = 20;
 const MAXCYC = 1000;
 
@@ -188,6 +187,7 @@ function Parse(k) {
 		const er = (english) ? "Parse Error " : "Napaka ";
 		const er1 = (english) ? "at " : "v ";
 		const line = Number(peek().pos().substr(0, peek().pos().indexOf(':')));
+		
 		selectLine(line);
 		
 		return "<span style='color: red;'>"+er+"</span>"+er1+peek().pos()+": "+errTxt(str, id);
@@ -687,7 +687,7 @@ console.log("BBB1:2 "+bool1+bool2);
 	// parse conditional statement, pos: position, id="if", "elsif" special case
 	function parseIf(pos, id) // oneStatement, elsifStatement) //******** IF ***********
 	{		
-		let ifst = new Statement("if");
+		let ifst = new IfStatement();
 		ifst.set({level: Number(circ.getBlok().get().level)});
 		ifst.set({pos: pos});
 		if (id==="elsif") {ifst.set({elsif: 1});}
@@ -744,6 +744,7 @@ console.log("BBB1:2 "+bool1+bool2);
 		if (peek().id==="else") {			
 			consume();
 			elseBlok = new Blok(blockNameStr+"e");
+			
 
             globPrevStatement="else";
 			if (detectElseIf) {
@@ -758,9 +759,9 @@ console.log("BBB1:2 "+bool1+bool2);
 				parseBlock(elseBlok);				
 				if (setup.syntaxC) {takeToken("}");}
 
-			} else {			
+			} else {				
 				if (n==="if") parseBlock(elseBlok, "if");
-				else parseBlock(elseBlok, "");  
+				else parseBlock(elseBlok, "?");  
 			}			
 		} else if (peek().id==="elsif") {			
 			elseBlok = new Blok(blockNameStr+"e");
@@ -988,7 +989,7 @@ console.log("BBB1:2 "+bool1+bool2);
 					
 					let n = 0;
 					
-					consume().id;
+					const id = consume().id;
 					if (!peek().isNum()) {throw parseErr("Expected number list!", id);}
 					numArray.push([Number(consume().id),0]);
 					while (peek().id === ",") {
@@ -1066,7 +1067,8 @@ console.log("Begin Parse");
 	  	  
 console.log("Begin Visit");
 	  let logStr=circ.visit(1); // visit, first pass
-	  
+	   document.getElementById("codevisit").innerHTML = logStr+"\n";
+       
 	  let v;
 	  let mod;
 	  
@@ -1098,6 +1100,8 @@ console.log("Begin Visit");
 	  circ.vars.forEach(function (val, id) {
 		var mod = mode(val); //val.getMode();
 		var mod1 = hdl(val).mode;
+		const varIsArray = type(val).array;
+		
 		if (mod1===undefined) {mod1 = "";}
 		if (mod==="") { // test internal signals			
 			if (mod1==="" || mod1==="out") {			
@@ -1113,7 +1117,7 @@ console.log("Begin Visit");
 				}
 			}
 			
-			if (mod1==="in") {
+			if (mod1==="in" && !varIsArray) { // if used as input and is not array
 				if (!circ.ports.has(id) && setup.convUnused) {
 					setLog("Note: convert unused: "+id+" to input");										
 					let obj = parsePorts(id, "in", typeToString(type(val)), 1);
@@ -1190,7 +1194,7 @@ console.log("Begin Visit");
 		});
 	}
 	  
-//console.log(whenElseList);  
+/*console.log(whenElseList);  
 	  whenElseList.forEach(function(id) {		  
 		  circ.getBlok().statements.forEach(function(st) {
 			 if (st.get().id==="if") {
@@ -1208,7 +1212,7 @@ console.log("***TODO*** found "+id+" in IF-ELSE block");
 		  });
 		  
 	  });
-
+*/
 	  setStat(stat.emit());	  
 	  
 	  if (log) {

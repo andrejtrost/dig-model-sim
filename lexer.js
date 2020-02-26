@@ -100,7 +100,7 @@ function Lexer(txt) {
 			return;
 		}		
 		
-		if (nextCh==="-") { // test for comment
+		if (nextCh==="-") { // test for line comment
 			getCh();
 			if (nextCh==="-") {	// skip comment
 				while (index<len && nextCh!=="\n") {getCh();}
@@ -109,7 +109,22 @@ function Lexer(txt) {
 				skipSpace();
 				return;
 			}
-		} 
+		} else if (nextCh==="/") { // and block comment
+			getCh();
+			if (nextCh==="*") {	// skip comment /* 
+				getCh();
+				var currentCh = "";
+				while (index<len && !(currentCh==="*" && nextCh==="/")) {
+					currentCh = nextCh;
+					getCh();					
+				}
+				getCh(); // skip last */
+			} else {  // division operator !!
+				look = new Token("/", "op", pos);
+				skipSpace();
+				return;
+			}
+		}
 		
 		if (isDigit(nextCh)) {			
 			z = getCh();
@@ -218,9 +233,12 @@ function Lexer(txt) {
 						look = new Token("|", "?", pos);
 						getCh();
 					}					
-				} else if (nextCh==="+" || nextCh==="*") {
+				} else if (nextCh==="+" ) {
 					look = new Token(nextCh, "op", pos);
 					getCh();
+				} else if (nextCh==="+" || nextCh==="*") {
+					look = new Token(nextCh, "op", pos);
+					getCh();						
 				} else if (nextCh==="{" || nextCh==="}") {
 					look = new Token(nextCh, nextCh, pos); // type: { or }
 					getCh();					
