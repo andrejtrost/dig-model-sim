@@ -34,8 +34,9 @@ function Token(tokenName, tokenType, position, numFormat) {
 	 if (/^(s|u)([0-9]*)$/.test(id)) return true; // correct pattern
 	 return false;
  }
- 
+  
  function isNum() {return (type==="num");} 
+ function isString() {return (type==='"');}
  function isAssign() {return (type==="=");} 
  function isOp() {return (type==="op");}
  
@@ -52,7 +53,7 @@ function Token(tokenName, tokenType, position, numFormat) {
  function format() { return fmt; }
 // console.log("Token: '"+id+"' "+position.y+","+position.x); 
  
- return {id, isVHD, isID, isTypeID, isNum, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos, format};
+ return {id, isVHD, isID, isTypeID, isNum, isString, isAssign, isOp, isSeparator, isEOF, isComparison, emit, pos, format};
 }
 
 
@@ -139,11 +140,22 @@ function Lexer(txt) {
 			   z = "";
 			   while (nextCh==="0" || nextCh==="1") {z += getCh();}
 			   if (z!=="") { look = new Token(parseInt(z, 2), "num", pos0, "b"+z.length); } //TODO save number size!
-			   else { look = new Token("0b", "?", pos0); }			   
+			   else { look = new Token("0b", "?", pos0); }
 			} else {			
 			  while (isDigit(nextCh)) {z += getCh();}
-			  look = new Token(z, "num", pos0, "d"+z.length);
+			  look = new Token(z, "num", pos0, "d"+z.length);			  
 			}
+		} else if (nextCh==='"') {	
+			getCh(); // consume parenthesis
+			z = "";			
+			while (nextCh==="0" || nextCh==="1") {z += getCh();}
+			const parenth = getCh();
+			/*if (parenth!=='"') {
+				throw parseErr("Unterminated string!", id)
+			}*/
+			if (parenth==='"' && z!=="") { look = new Token(parseInt(z, 2), "num", pos0, "b"+z.length); } //TODO save number size!
+		    else { look = new Token(z, '"', pos0); }
+			  
 		} else if (isIDStart(nextCh)) {
 			z = getCh();
 			while (isIDchar(nextCh)) {z += getCh();}
@@ -157,6 +169,7 @@ function Lexer(txt) {
 				case "if": look = new Token("if", "if", pos0); break;
 				case "else": look = new Token("else", "else", pos0); break;
 				case "elsif": look = new Token("elsif", "elsif", pos0); break;
+				case "when": look = new Token("when", "when", pos0); break;
 				default: look = new Token(z, "id", pos0);
 			}			
 			
@@ -233,9 +246,6 @@ function Lexer(txt) {
 						look = new Token("|", "?", pos);
 						getCh();
 					}					
-				} else if (nextCh==="+" ) {
-					look = new Token(nextCh, "op", pos);
-					getCh();
 				} else if (nextCh==="+" || nextCh==="*") {
 					look = new Token(nextCh, "op", pos);
 					getCh();						

@@ -177,11 +177,13 @@ function hide(id) {
 
 function save()
 {
- let data=editor.getValue(); 
+ let data=editor.getValue();
+ let file_name = document.getElementById("comp_name").value;
  
  parseCode(); // try to parse model
  let p ="";
  if (model) {
+	file_name = model.name(); // set name to model name
 	ptable = getPorts();
 	 
 	if (ptable.size > 0) {
@@ -202,7 +204,8 @@ function save()
  let a = document.createElement("a"),
      file = new Blob([data], {type: "text/plain;charset=utf-8"});
 	
- const file_name = document.getElementById("comp_name").value;
+ 
+ //const file_name = document.getElementById("comp_name").value;
 	
  if (window.navigator.msSaveOrOpenBlob) // IE10+
 	window.navigator.msSaveOrOpenBlob(file, filename);
@@ -365,6 +368,11 @@ function errTxt(str, id) {  // compose error log text, use global english
 		                             "Mešanje kombinacijsih in sekvenčnih prireditev!"; break;
 		case "mult": s = (english) ?  "Multiple assignments to '"+id+"' in same block!" :
 									  "Večkratna prireditev signalu '"+id+"' v istem bloku!"; break;
+		case "rel": s = (english) ?  "Relation operator is not allowed in assignment statement!" :
+									  "Relacijski operator ni dovoljen v prireditvenem stavku!"; break;
+		case "str": s = (english) ?  "Illegal bit string format!" :
+									 "Neveljaven zapis niza bitov!"; break;
+									  
 		default: s = str;
 	}
 	return s;
@@ -466,4 +474,33 @@ function removePort() {
 function selectLine(lineNum) { // select a line in CodeMirror
 	const len = editor.getLine(lineNum-1).length;
 	editor.setSelection({line: lineNum-1, ch:0}, {line: lineNum-1, ch:len});
+}
+
+function newEntity()
+{
+	const r = confirm("New HDL description ?"); 
+
+	if (r == true) {
+		clearLog();
+		const defName = document.getElementById("comp_name").value;
+		let str = "entity "+defName+"\n";
+
+		try {
+			getPorts();
+			
+			[...Array(setup.nPorts)].forEach(function(_, i) {
+				id = document.getElementById("name"+(i+1)).value; // id name or id list
+				const modeStr = document.getElementById("mode"+(i+1)).value;
+				var typeStr = (document.getElementById("type"+(i+1)).value);
+				if (typeStr==="") typeStr="u1";
+				
+				if (id!=="") {str += " "+id+": "+modeStr+" "+typeStr+";\n";}
+			}); 
+		} catch (er) {
+			setLog(er);			
+		}		
+		
+		str += "begin\n\nend\n";
+		editor.setValue(str);
+	}
 }

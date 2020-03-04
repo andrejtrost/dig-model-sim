@@ -2,10 +2,11 @@
 /*jshint esversion: 6 */
 /*jslint bitwise: true */
 
-const parseVersion = "V.30";
+const parseVersion = "V.31";
 const MAXITER = 20;
 const MAXCYC = 1000;
 
+let globCurStatement="";
 let globPrevStatement="";
 let globAssignSize=0; //29.3.
 
@@ -16,7 +17,9 @@ function Circuit(nameString, toplevel) {
  let nameStr = nameString;
  let b = new Blok("1");
  let vars = new Map(); 
- let ports = (toplevel) ? getPorts() : new Map(); // get ports for top-level circuit
+ //let ports = (toplevel) ? getPorts() : new Map(); // get ports for top-level circuit
+ let ports = new Map(); // get ports for top-level circuit V31
+ 
  let labels = [];
  let sequential = false;
  let srcChanged = false;     // input source changed after parsing
@@ -261,6 +264,7 @@ function Parse(k) {
 			}
 			return e;					
 		} else {
+			if (t.isString()) throw parseErr("str");
 			throw parseErr("expvn"); //Expected identifier or number
 		}
 	}
@@ -454,7 +458,8 @@ function Parse(k) {
 			if (setup.syntaxC) {throw parseErr("vuse");}
 			opEqual=true;  // VHDL comparison op (=)
 		} 		
-		if (isComparisonOp(peek().id) || opEqual) {			
+		if (isComparisonOp(peek().id) || opEqual) {
+			if (globCurStatement==="a") {throw parseErr("rel");} // V31 relation not allowed in assignment
 			let o;
 			if (opEqual) {o="=="; consume();}
 			else {
@@ -621,11 +626,13 @@ console.log("BBB1:2 "+bool1+bool2);
 	
 	function parseAssign(v, op, pos) // assignment expression (take var v)
 	{
+		globCurStatement="a";
 		let a = new Statement(op);  // statement, define target, position and level
 		a.setTarget(v);
 		
-		a.set({pos: pos});				
-		a.set({level: Number(circ.getBlok().get().level)});		
+		a.set({pos: pos});
+		let level =	circ.getBlok().get().level;
+		a.set({level: Number(level)});
 		stat.setPos(pos);
 		globAssignSize = type(v).size;
 		
@@ -633,8 +640,8 @@ console.log("BBB1:2 "+bool1+bool2);
 		//v.set({hdl: {assignlevel:stat.getBlockLevel()}});				
 		
 		// opnode
-		let node = new Op({op:"", left:null, right:null});		
-		node = expression(node); //exprList(node);
+		let node = new Op({op:"", left:null, right:null});
+		node = expression(node); //exprList(node); 		
 		
 		if (node === undefined) {return;}
 		a.setExpr(node);
@@ -658,6 +665,54 @@ console.log("BBB1:2 "+bool1+bool2);
 		}
 		
 		globPrevStatement="a";
+		
+		//V31 check and parse conditional when-else 
+		let t = peek();
+	    if (peek().id==="when") {
+			globCurStatement="b";
+			consume();			
+
+			let whenSt = new IfStatement(); // create if statement
+            
+			whenSt.set({level: Number(level)}); 
+			if (level===0 && op==="=") { // set ifType=1 (when..else) level 0 comb
+				whenSt.set({ifType: 1});
+			}
+			stat.setPos(pos);               // set statement position
+			stat.pushBlock();  // define next block level
+			
+			// create new blocks, set level+1
+			let ifBlok = new Blok(stat.blockName());
+			ifBlok.set({level: (Number(level)+1)});
+			
+			a.set({level: Number(level)+1}); // change assignment statement level
+			ifBlok.push(a);  // and push to if block
+			
+			whenSt.setExpr(condition()); // parse condition
+			
+			if (peek().id!=="else") {
+				throw parseErr("exp","else");							
+			}
+			consume(); // consume else
+			
+			let node2 = new Op({op:"", left:null, right:null});
+			node2 = expression(node2);
+			
+			let a2 = new Statement(op);  // statement, define target, position and level
+			a2.setTarget(v);
+			a2.setExpr(node2);
+			a2.set({pos: pos});
+			a2.set({level: Number(level)+1});
+			
+			let elseBlok = new Blok(stat.blockName()+"e");
+			elseBlok.set({level: (Number(level)+1)});
+			elseBlok.push(a2);
+			
+			whenSt.setIf(ifBlok, elseBlok);
+			stat.popBlock();
+			return whenSt;
+		}			
+				
 		return a;
 	}
 	
@@ -699,9 +754,17 @@ console.log("BBB1:2 "+bool1+bool2);
 		let ifblok = new Blok(blockNameStr); // create new code block
 		let elseBlok = null;
 		
-		takeToken("(");		// parse condition
+		let parenth = false;
+		
+		// parse condition
+		if (peek().id==="(") { 
+			parenth = true; 
+			takeToken("(");
+		}		
 		ifst.setExpr(condition());		
-		takeToken(")");
+		if (parenth) {
+			takeToken(")");
+		}
 		
 		// detect "else if"
 		let detectElseIf = (id==="if" && globPrevStatement==="else") ? true : false;		
@@ -735,13 +798,19 @@ console.log("BBB1:2 "+bool1+bool2);
 			parseBlock(ifblok, "");			
 			if (setup.syntaxC) {takeToken("}");}
 		} else {
-			singleStatement = true; // one statement block
-			parseBlock(ifblok, "?");
+			if (parenth) {
+				singleStatement = true; // one statement block
+				parseBlock(ifblok, "?");
+			} else {
+				throw parseErr("exp", "then");
+			}
 		}
 		
-				
-		skipSeparators();		
-		if (peek().id==="else") {			
+		if (!singleStatement) { // skip new line if not single statement
+		  skipSeparators();	
+		}
+		
+		if (peek().id==="else") {
 			consume();
 			elseBlok = new Blok(blockNameStr+"e");
 			
@@ -754,7 +823,7 @@ console.log("BBB1:2 "+bool1+bool2);
 			}
 			circ.setBlok(elseBlok);	
 			n = peek().id;	
-			if (n==="\n" || n==="{") {	// if not one statement block
+			if (n==="\n" || n==="{" || !singleStatement) {	// if not one statement block
 			    if (setup.syntaxC && n==="{") {takeToken("{");}
 				parseBlock(elseBlok);				
 				if (setup.syntaxC) {takeToken("}");}
@@ -818,6 +887,8 @@ console.log("BBB1:2 "+bool1+bool2);
 		
 		skipSeparators();		
 		let t = peek();
+		
+		globCurStatement=""; // reset current parsed statement
 		//if (t.id === endKey) {return null;}
 		
 		if (t.id==="if") {      // if statement
@@ -952,6 +1023,8 @@ console.log("BBB1:2 "+bool1+bool2);
     } 
 	
 	circ = new Circuit(circuitName, toplevel);
+	let portsTable = getPorts(); 
+	
 	if (peek().id==="begin") {  // parse circuit block declaration
 		consume();
 		beginBlock = true;
@@ -1003,14 +1076,26 @@ console.log("BBB1:2 "+bool1+bool2);
 				tmp = consume().id;  
 			  }
 			  
-			  let declared = 1;
+			  let declared = 1;			  
 			  
 			  varid.forEach(function (ident, j) {
 				  // check if not already in ports
-				  if (circ.ports.has(ident)) {throw parseErr("decl", ident);}
+				  if (circ.ports.has(ident)) { // already declared					  
+					  throw parseErr("decl", ident);
+				  }
 				  
 				  declared = (j === varid.length-1) ? 1 : 2;			  
-				  let obj = parsePorts(ident, vmode, tmp, declared)				  
+				  let obj = parsePorts(ident, vmode, tmp, declared)
+				  if (portsTable.has(ident)) { // check for portsTable declaration mismatch
+					if ((obj.type.unsigned!==portsTable.get(ident).type.unsigned) ||
+						(obj.type.size!==portsTable.get(ident).type.size) ||
+						(obj.mode!==portsTable.get(ident).mode))
+					{		  
+						throw parseErr("Signal '"+ident+"' declaration type/value mismatch");
+					}	
+	
+				  }
+				  
 				  if (vmem) { // add init attribute
 					if (numArray.length!=0) { obj.init = numArray; }
 				  }
@@ -1031,6 +1116,15 @@ console.log("BBB1:2 "+bool1+bool2);
 			beginBlock = true;
 		}
 	}
+	
+// V31 after declarations, get undeclared items from html port table	
+	portsTable.forEach(function (val, id) {
+		if (!circ.ports.has(id)) {
+		  circ.ports.set(id, val); // add ports and vars table		  
+		  if (circ.vars.has(id)) {throw parseErr("decl", id);}
+		  v = circ.getVar(id);		  
+		}
+	});
 	 
 	parseBlock(circ); // main: parse circuit block
 	
@@ -1168,7 +1262,10 @@ console.log("Begin Visit");
 			}			
 		}
 		// when...else ?
-		if (hdl(val).assignop==="=" && hdl(val).assignments===2) {whenElseList.push(id);}
+		if (hdl(val).assignop==="=" && hdl(val).assignments===2) {
+			whenElseList.push(id);
+console.log("when else "+id);			
+		}
 
 		
 		
@@ -1194,7 +1291,7 @@ console.log("Begin Visit");
 		});
 	}
 	  
-/*console.log(whenElseList);  
+/*console.log(whenElseList);
 	  whenElseList.forEach(function(id) {		  
 		  circ.getBlok().statements.forEach(function(st) {
 			 if (st.get().id==="if") {
